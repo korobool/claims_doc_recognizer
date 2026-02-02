@@ -23,8 +23,36 @@ source venv/bin/activate  # Linux/Mac
 # or
 venv\Scripts\activate  # Windows
 
-# Install dependencies
+# Install PyTorch with GPU support (auto-detects platform)
+chmod +x install_pytorch.sh
+./install_pytorch.sh
+
+# Install other dependencies
 pip install -r requirements.txt
+```
+
+### GPU Acceleration
+
+The `install_pytorch.sh` script automatically detects your platform and installs the appropriate PyTorch version:
+
+| Platform | Acceleration |
+|----------|--------------|
+| NVIDIA GPU (x86_64) | CUDA |
+| NVIDIA GPU (ARM64/DGX) | CUDA via NVIDIA PyPI |
+| Apple Silicon (M1/M2/M3) | MPS |
+| CPU only | CPU |
+
+**Manual PyTorch installation** (if script fails):
+
+```bash
+# NVIDIA GPU (x86_64):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# NVIDIA GPU (ARM64/DGX/Jetson):
+pip install torch torchvision --index-url https://pypi.nvidia.com
+
+# Apple Silicon or CPU:
+pip install torch torchvision
 ```
 
 **Note**: On first run, Surya OCR models will be downloaded automatically (~1.5GB). CLIP model (~150MB) downloads on first classification.
