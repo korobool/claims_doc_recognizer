@@ -43,6 +43,11 @@ def get_device_info() -> dict:
     """Get detailed device information for all components."""
     global _device_info
     
+    # PyTorch build info
+    _device_info["pytorch_version"] = torch.__version__
+    _device_info["pytorch_cuda_built"] = torch.version.cuda is not None
+    _device_info["pytorch_cuda_version"] = torch.version.cuda
+    
     # Update CUDA info (NVIDIA GPU / DGX)
     _device_info["cuda_available"] = torch.cuda.is_available()
     if torch.cuda.is_available():
@@ -92,22 +97,37 @@ def print_device_info():
     print("HARDWARE ACCELERATION DETECTION")
     print("="*60)
     
+    # PyTorch build info
+    print(f"PyTorch Version: {torch.__version__}")
+    print(f"PyTorch CUDA Built: {torch.version.cuda if torch.version.cuda else 'No (CPU-only build)'}")
+    print(f"CUDA Available: {torch.cuda.is_available()}")
+    
+    if not torch.cuda.is_available() and torch.version.cuda is None:
+        print("")
+        print("WARNING: PyTorch installed without CUDA support!")
+        print("To enable NVIDIA GPU acceleration, reinstall PyTorch:")
+        print("  pip uninstall torch torchvision")
+        print("  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121")
+        print("")
+    
     if info['cuda_available']:
+        print(f"")
         print(f"ACCELERATION: {info['acceleration_type']}")
-        print(f"CUDA Version: {info['cuda_version']}")
+        print(f"CUDA Runtime: {info['cuda_version']}")
         print(f"GPU Count: {info['gpu_count']}")
         print(f"GPU Name: {info['gpu_name']}")
         if info['gpu_memory_total']:
             print(f"GPU Memory: {info['gpu_memory_total']}")
     elif info['mps_available']:
+        print(f"")
         print(f"ACCELERATION: MPS (Apple Silicon)")
         print(f"Metal Performance Shaders: ENABLED")
     else:
-        print(f"ACCELERATION: CPU Only (No GPU detected)")
+        print(f"")
+        print(f"ACCELERATION: CPU Only")
     
     print(f"")
-    print(f"PyTorch Device: {device}")
-    print(f"")
+    print(f"Selected Device: {device}")
     print(f"All models will use '{device}' for inference.")
     print("="*60 + "\n")
 

@@ -8,6 +8,10 @@ jinja2>=3.1.0
 aiofiles>=23.0.0
 numpy>=1.24.0
 requests>=2.31.0
-torch>=2.0.0
 scipy>=1.10.0
 transformers>=4.45.0,<4.57.0
+
+# PyTorch - NOTE: For NVIDIA GPU/CUDA support, install manually:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# For CPU only (default):
+# torch>=2.0.0

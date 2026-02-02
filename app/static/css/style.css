@@ -628,6 +628,10 @@ body {
     color: #f59e0b;
 }
 
+.device-value.status-error {
+    color: #ef4444;
+}
+
 .acceleration-row .device-value {
     font-weight: 600;
 }

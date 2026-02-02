@@ -39,6 +39,9 @@ const elements = {
     deviceInfoStatus: document.getElementById('deviceInfoStatus'),
     deviceInfoDetails: document.getElementById('deviceInfoDetails'),
     deviceInfoToggle: document.getElementById('deviceInfoToggle'),
+    pytorchVersion: document.getElementById('pytorchVersion'),
+    pytorchCudaBuild: document.getElementById('pytorchCudaBuild'),
+    pytorchCudaRow: document.getElementById('pytorchCudaRow'),
     accelerationType: document.getElementById('accelerationType'),
     selectedDevice: document.getElementById('selectedDevice'),
     cudaVersion: document.getElementById('cudaVersion'),
@@ -820,6 +823,22 @@ function updateDeviceInfoUI(info) {
     if (!elements.deviceInfoStatus) {
         console.error('Device info elements not found in DOM');
         return;
+    }
+    
+    // Update PyTorch version
+    if (elements.pytorchVersion) {
+        elements.pytorchVersion.textContent = info.pytorch_version || '-';
+    }
+    
+    // Update PyTorch CUDA build status
+    if (elements.pytorchCudaBuild) {
+        if (info.pytorch_cuda_built) {
+            elements.pytorchCudaBuild.textContent = info.pytorch_cuda_version || 'Yes';
+            elements.pytorchCudaBuild.className = 'device-value status-gpu';
+        } else {
+            elements.pytorchCudaBuild.textContent = 'No (CPU only)';
+            elements.pytorchCudaBuild.className = 'device-value status-error';
+        }
     }
     
     // Update acceleration type
