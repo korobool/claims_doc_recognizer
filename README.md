@@ -5,7 +5,7 @@ General idea is to be able to demo local inference capabilities and simplicity s
 Observations:
 * Text recognition speed on GB10 is appoximately 10 times faster than on Apple silicon (M3)
 * Bounding boxes and recognition can be tunned by config AND finetuning
-* Works well even for complex handwritten text in relatiely significant number of languages
+* Works well even for complex handwritten text for significant number of languages
 * Can be integrated into claims processing pipelines easily
 
 ![Pipeline](pipeline.png)
