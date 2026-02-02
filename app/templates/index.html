@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Recognition System</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=15">
+    <link rel="stylesheet" href="/static/css/style.css?v=17">
 </head>
 <body>
     <div class="container">
@@ -39,6 +39,7 @@
             <!-- Main area tabs -->
             <div class="main-tabs">
                 <button class="main-tab active" data-tab="viewer" id="viewerTabBtn">📄 Document Viewer</button>
+                <button class="main-tab" data-tab="llm" id="llmTabBtn">🤖 LLM Enhanced</button>
                 <button class="main-tab" data-tab="schemas" id="schemasTabBtn">⚙️ Schema Templates</button>
             </div>
             
@@ -118,9 +119,70 @@
                     </div>
                 </div>
             </div><!-- End schemasTab -->
+            
+            <!-- LLM Enhanced Tab -->
+            <div class="main-tab-content" id="llmMainTab" style="display: none;">
+                <div class="llm-main-container">
+                    <div class="llm-controls-panel">
+                        <div class="llm-status" id="llmStatusMain">
+                            <span class="status-indicator" id="ollamaStatusMain">⚪</span>
+                            <span id="ollamaStatusTextMain">Checking Ollama...</span>
+                        </div>
+                        <div class="llm-acceleration" id="llmAccelerationMain">
+                            <span class="accel-icon" id="accelIconMain">⚡</span>
+                            <span id="accelTextMain">Checking acceleration...</span>
+                        </div>
+                        <div class="llm-model-select">
+                            <label for="llmModelSelectMain">Model:</label>
+                            <select id="llmModelSelectMain" disabled>
+                                <option value="">Loading...</option>
+                            </select>
+                            <button class="btn btn-small" id="pullModelBtnMain" disabled title="Pull model if not available">
+                                ⬇️
+                            </button>
+                        </div>
+                        <div class="pull-progress" id="pullProgressMain" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="pullProgressFillMain"></div>
+                            </div>
+                            <span class="progress-text" id="pullProgressTextMain">Downloading...</span>
+                        </div>
+                        <button class="btn btn-primary" id="processLlmBtnMain" disabled>
+                            🔄 Process with LLM
+                        </button>
+                    </div>
+                    <div class="llm-result-panel">
+                        <div class="llm-placeholder" id="llmPlaceholderMain">
+                            <p>Run OCR first, then click "Process with LLM" to enhance results</p>
+                        </div>
+                        <div class="llm-result" id="llmResultMain" style="display: none;">
+                            <div class="llm-section" id="llmExtractedFieldsSectionMain">
+                                <h4>📋 Extracted Fields <span class="doc-type-badge" id="llmDocTypeBadgeMain"></span></h4>
+                                <div class="extracted-fields" id="llmExtractedFieldsMain"></div>
+                            </div>
+                            <div class="llm-section">
+                                <h4>📝 Corrected Text</h4>
+                                <div class="llm-text" id="llmEnhancedTextMain"></div>
+                            </div>
+                            <div class="llm-section" id="llmConfidenceSectionMain" style="display: none;">
+                                <h4>ℹ️ Notes</h4>
+                                <div class="llm-notes" id="llmConfidenceNotesMain"></div>
+                            </div>
+                            <div class="llm-meta">
+                                <span>Model: <strong id="llmModelUsedMain">-</strong></span>
+                                <span class="llm-doc-type">Document: <strong id="llmDocTypeMain">-</strong></span>
+                            </div>
+                        </div>
+                        <div class="llm-loading" id="llmLoadingMain" style="display: none;">
+                            <div class="spinner"></div>
+                            <p>Processing with LLM...</p>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- End llmMainTab -->
         </main>
 
-        <!-- Right panel: Results with tabs -->
+        <!-- Right panel: Results -->
         <aside class="sidebar right-panel">
             <div class="device-info-container" id="deviceInfoContainer">
                 <div class="device-info-header" onclick="toggleDeviceInfo()">
@@ -181,84 +243,14 @@
                 <span class="document-class-confidence" id="documentClassConfidence"></span>
             </div>
             
-            <!-- Tab navigation -->
-            <div class="result-tabs">
-                <button class="tab-btn active" data-tab="json" onclick="switchTab('json')">
-                    📄 JSON
-                </button>
-                <button class="tab-btn" data-tab="llm" onclick="switchTab('llm')">
-                    🤖 LLM Enhanced
-                </button>
-            </div>
-            
-            <!-- JSON Tab Content -->
-            <div class="tab-content active" id="jsonTab">
-                <div class="json-container">
-                    <pre id="jsonOutput" contenteditable="false">
+            <!-- JSON Results -->
+            <h3 class="results-header">📄 OCR Results</h3>
+            <div class="json-container">
+                <pre id="jsonOutput" contenteditable="false">
 {
   "text_lines": [],
   "image_bbox": []
 }</pre>
-                </div>
-            </div>
-            
-            <!-- LLM Tab Content -->
-            <div class="tab-content" id="llmTab" style="display: none;">
-                <div class="llm-controls">
-                    <div class="llm-status" id="llmStatus">
-                        <span class="status-indicator" id="ollamaStatus">⚪</span>
-                        <span id="ollamaStatusText">Checking Ollama...</span>
-                    </div>
-                    <div class="llm-acceleration" id="llmAcceleration">
-                        <span class="accel-icon" id="accelIcon">⚡</span>
-                        <span id="accelText">Checking acceleration...</span>
-                    </div>
-                    <div class="llm-model-select">
-                        <label for="llmModelSelect">Model:</label>
-                        <select id="llmModelSelect" disabled>
-                            <option value="">Loading...</option>
-                        </select>
-                        <button class="btn btn-small" id="pullModelBtn" disabled title="Pull model if not available">
-                            ⬇️
-                        </button>
-                    </div>
-                    <div class="pull-progress" id="pullProgress" style="display: none;">
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="pullProgressFill"></div>
-                        </div>
-                        <span class="progress-text" id="pullProgressText">Downloading...</span>
-                    </div>
-                    <button class="btn btn-primary" id="processLlmBtn" disabled>
-                        🔄 Process with LLM
-                    </button>
-                </div>
-                <div class="llm-result-container">
-                    <div class="llm-placeholder" id="llmPlaceholder">
-                        <p>Run OCR first, then click "Process with LLM" to enhance results</p>
-                    </div>
-                    <div class="llm-result" id="llmResult" style="display: none;">
-                        <div class="llm-section" id="llmExtractedFieldsSection">
-                            <h4>📋 Extracted Fields <span class="doc-type-badge" id="llmDocTypeBadge"></span></h4>
-                            <div class="extracted-fields" id="llmExtractedFields"></div>
-                        </div>
-                        <div class="llm-section">
-                            <h4>📝 Corrected Text</h4>
-                            <div class="llm-text" id="llmEnhancedText"></div>
-                        </div>
-                        <div class="llm-section" id="llmConfidenceSection" style="display: none;">
-                            <h4>ℹ️ Notes</h4>
-                            <div class="llm-notes" id="llmConfidenceNotes"></div>
-                        </div>
-                        <div class="llm-meta">
-                            <span>Model: <strong id="llmModelUsed">-</strong></span>
-                            <span class="llm-doc-type">Document: <strong id="llmDocType">-</strong></span>
-                        </div>
-                    </div>
-                    <div class="llm-loading" id="llmLoading" style="display: none;">
-                        <div class="spinner"></div>
-                        <p>Processing with LLM...</p>
-                    </div>
-                </div>
             </div>
             
             <button class="btn btn-success" id="saveBtn" disabled>
@@ -267,6 +259,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=16"></script>
+    <script src="/static/js/app.js?v=17"></script>
 </body>
 </html>

@@ -1271,3 +1271,153 @@ body {
     resize: none;
     overflow: auto;
 }
+
+/* =============================================================================
+   LLM ENHANCED TAB (Main Area)
+   ============================================================================= */
+
+.llm-main-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 16px;
+    padding: 16px;
+}
+
+.llm-controls-panel {
+    width: 280px;
+    background: #1a1a2e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.llm-controls-panel .llm-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #252538;
+    border-radius: 6px;
+}
+
+.llm-controls-panel .llm-acceleration {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #252538;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.llm-controls-panel .llm-model-select {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.llm-controls-panel .llm-model-select label {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.llm-controls-panel .llm-model-select select {
+    padding: 10px 12px;
+    background: #252538;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #eee;
+    font-size: 13px;
+}
+
+.llm-controls-panel .pull-progress {
+    padding: 8px 0;
+}
+
+.llm-controls-panel #processLlmBtnMain {
+    margin-top: auto;
+    padding: 12px;
+}
+
+.llm-result-panel {
+    flex: 1;
+    background: #1a1a2e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.llm-result-panel .llm-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #666;
+    font-size: 14px;
+}
+
+.llm-result-panel .llm-result {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.llm-result-panel .llm-section {
+    background: #252538;
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.llm-result-panel .llm-section h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: #aaa;
+}
+
+.llm-result-panel .extracted-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.llm-result-panel .llm-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #ddd;
+    white-space: pre-wrap;
+}
+
+.llm-result-panel .llm-meta {
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    color: #666;
+    padding-top: 12px;
+    border-top: 1px solid #333;
+}
+
+.llm-result-panel .llm-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    gap: 16px;
+    color: #888;
+}
+
+/* Results header in right panel */
+.results-header {
+    font-size: 14px;
+    color: #888;
+    margin: 0 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+}
