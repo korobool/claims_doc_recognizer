@@ -269,6 +269,9 @@ async function recognizeImage() {
         elements.saveBtn.disabled = false;
         elements.addBboxBtn.disabled = false;
         
+        // Refresh device info (models are now initialized)
+        fetchDeviceInfo();
+        
     } catch (error) {
         console.error('Recognition error:', error);
         alert('Recognition error');
