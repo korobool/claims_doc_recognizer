@@ -321,6 +321,7 @@ def recognize_region(image_bytes: bytes, bbox: list) -> dict:
 
 
 # Keywords for document classification (English and Russian)
+# Maps display_name -> (type_id, keywords)
 DOCUMENT_KEYWORDS = {
     "Receipt": [
         "receipt", "total", "subtotal", "tax", "payment", "cash", "change",
@@ -344,6 +345,17 @@ DOCUMENT_KEYWORDS = {
         "договор", "контракт", "соглашение", "сторона", "стороны", "условия",
         "обязательства", "подписано", "дата вступления"
     ]
+}
+
+# Mapping from display name to schema type_id
+DISPLAY_NAME_TO_TYPE_ID = {
+    "Receipt": "receipt",
+    "Medication Prescription": "prescription",
+    "Form": "medical_form",
+    "Contract": "contract",
+    "Lab Results": "lab_results",
+    "Insurance Claim": "insurance_claim",
+    "Undetected": "unknown"
 }
 
 
@@ -435,6 +447,13 @@ def classify_image_with_clip(image: Image.Image) -> dict:
         return {"class": "Undetected", "confidence": 0.0}
 
 
+def _add_type_id(result: dict) -> dict:
+    """Add type_id to classification result based on class name."""
+    class_name = result.get("class", "Undetected")
+    result["type_id"] = DISPLAY_NAME_TO_TYPE_ID.get(class_name, "unknown")
+    return result
+
+
 def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
     """
     Hybrid document classification combining CLIP (image) and text-based methods.
@@ -444,7 +463,7 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
         text_lines: List of recognized text lines
         
     Returns:
-        dict: Document class and confidence score
+        dict: Document class, type_id, and confidence score
     """
     # Get image-based classification (CLIP)
     image_result = classify_image_with_clip(image)
@@ -456,42 +475,42 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
     # If both methods agree - high confidence
     if image_result["class"] == text_result["class"] and image_result["class"] != "Undetected":
         combined_confidence = min(1.0, (image_result["confidence"] + text_result["confidence"]) / 1.5)
-        return {
+        return _add_type_id({
             "class": image_result["class"],
             "confidence": round(combined_confidence, 2),
             "method": "hybrid"
-        }
+        })
     
     # If text-based has high confidence result - prefer it
     if text_result["class"] != "Undetected" and text_result["confidence"] >= 0.5:
-        return {
+        return _add_type_id({
             "class": text_result["class"],
             "confidence": round(text_result["confidence"] * 0.9, 2),
             "method": "text"
-        }
+        })
     
     # If CLIP has high confidence result - use it
     if image_result["class"] != "Undetected" and image_result["confidence"] >= 0.3:
-        return {
+        return _add_type_id({
             "class": image_result["class"],
             "confidence": round(image_result["confidence"], 2),
             "method": "image"
-        }
+        })
     
     # If text-based has any result
     if text_result["class"] != "Undetected":
-        return {
+        return _add_type_id({
             "class": text_result["class"],
             "confidence": round(text_result["confidence"] * 0.7, 2),
             "method": "text"
-        }
+        })
     
     # If CLIP has any result
     if image_result["class"] != "Undetected":
-        return {
+        return _add_type_id({
             "class": image_result["class"],
             "confidence": round(image_result["confidence"] * 0.7, 2),
             "method": "image"
-        }
+        })
     
-    return {"class": "Undetected", "confidence": 0.0, "method": "none"}
+    return _add_type_id({"class": "Undetected", "confidence": 0.0, "method": "none"})
