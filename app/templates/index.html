@@ -72,16 +72,24 @@
                         <span class="device-value" id="accelerationType">-</span>
                     </div>
                     <div class="device-info-row">
-                        <span class="device-label">PyTorch Device:</span>
+                        <span class="device-label">Device:</span>
                         <span class="device-value" id="selectedDevice">-</span>
                     </div>
                     <div class="device-info-row" id="cudaVersionRow" style="display: none;">
                         <span class="device-label">CUDA Version:</span>
                         <span class="device-value" id="cudaVersion">-</span>
                     </div>
+                    <div class="device-info-row" id="gpuCountRow" style="display: none;">
+                        <span class="device-label">GPU Count:</span>
+                        <span class="device-value" id="gpuCount">-</span>
+                    </div>
                     <div class="device-info-row" id="gpuNameRow" style="display: none;">
                         <span class="device-label">GPU:</span>
                         <span class="device-value" id="gpuName">-</span>
+                    </div>
+                    <div class="device-info-row" id="gpuMemoryRow" style="display: none;">
+                        <span class="device-label">GPU Memory:</span>
+                        <span class="device-value" id="gpuMemory">-</span>
                     </div>
                     <div class="device-info-separator"></div>
                     <div class="device-info-row">
@@ -114,6 +122,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=4"></script>
+    <script src="/static/js/app.js?v=5"></script>
 </body>
 </html>

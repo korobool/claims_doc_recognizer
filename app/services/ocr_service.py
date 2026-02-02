@@ -22,7 +22,11 @@ _device_info = {
     "cuda_available": False,
     "cuda_version": None,
     "gpu_name": None,
-    "mps_available": False
+    "gpu_count": 0,
+    "gpu_memory_total": None,
+    "mps_available": False,
+    "acceleration_type": None,
+    "selected_device": None
 }
 
 
@@ -39,22 +43,39 @@ def get_device_info() -> dict:
     """Get detailed device information for all components."""
     global _device_info
     
-    # Update CUDA info
+    # Update CUDA info (NVIDIA GPU / DGX)
     _device_info["cuda_available"] = torch.cuda.is_available()
     if torch.cuda.is_available():
         _device_info["cuda_version"] = torch.version.cuda
+        _device_info["gpu_count"] = torch.cuda.device_count()
         _device_info["gpu_name"] = torch.cuda.get_device_name(0)
+        
+        # Get GPU memory info
+        try:
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory
+            _device_info["gpu_memory_total"] = f"{gpu_mem / (1024**3):.1f} GB"
+        except:
+            _device_info["gpu_memory_total"] = None
+        
+        # Detect DGX or special NVIDIA hardware
+        gpu_name = _device_info["gpu_name"].upper()
+        if "DGX" in gpu_name or "A100" in gpu_name or "H100" in gpu_name or "V100" in gpu_name:
+            _device_info["acceleration_type"] = f"NVIDIA DGX/HPC ({_device_info['gpu_name']})"
+        else:
+            _device_info["acceleration_type"] = f"CUDA ({_device_info['gpu_name']})"
+    else:
+        _device_info["gpu_count"] = 0
+        _device_info["gpu_memory_total"] = None
     
     # Update MPS info (Apple Silicon)
     _device_info["mps_available"] = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
     
-    # Determine acceleration type
-    if _device_info["cuda_available"]:
-        _device_info["acceleration_type"] = "CUDA (NVIDIA GPU)"
-    elif _device_info["mps_available"]:
-        _device_info["acceleration_type"] = "MPS (Apple Silicon)"
-    else:
-        _device_info["acceleration_type"] = "CPU Only"
+    # Determine acceleration type if not CUDA
+    if not _device_info["cuda_available"]:
+        if _device_info["mps_available"]:
+            _device_info["acceleration_type"] = "MPS (Apple Silicon)"
+        else:
+            _device_info["acceleration_type"] = "CPU Only"
     
     # Selected device
     _device_info["selected_device"] = str(get_device())
@@ -68,24 +89,26 @@ def print_device_info():
     device = get_device()
     
     print("\n" + "="*60)
-    print("DEVICE DETECTION RESULTS")
+    print("HARDWARE ACCELERATION DETECTION")
     print("="*60)
     
-    # Determine acceleration type
     if info['cuda_available']:
-        print(f"GPU ACCELERATION: CUDA (NVIDIA)")
+        print(f"ACCELERATION: {info['acceleration_type']}")
         print(f"CUDA Version: {info['cuda_version']}")
+        print(f"GPU Count: {info['gpu_count']}")
         print(f"GPU Name: {info['gpu_name']}")
+        if info['gpu_memory_total']:
+            print(f"GPU Memory: {info['gpu_memory_total']}")
     elif info['mps_available']:
-        print(f"GPU ACCELERATION: MPS (Apple Silicon)")
+        print(f"ACCELERATION: MPS (Apple Silicon)")
         print(f"Metal Performance Shaders: ENABLED")
     else:
-        print(f"GPU ACCELERATION: None (CPU only)")
+        print(f"ACCELERATION: CPU Only (No GPU detected)")
     
     print(f"")
     print(f"PyTorch Device: {device}")
     print(f"")
-    print(f"Models will use {device} when initialized on first request.")
+    print(f"All models will use '{device}' for inference.")
     print("="*60 + "\n")
 
 # Class descriptions for CLIP zero-shot classification

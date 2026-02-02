@@ -43,8 +43,12 @@ const elements = {
     selectedDevice: document.getElementById('selectedDevice'),
     cudaVersion: document.getElementById('cudaVersion'),
     cudaVersionRow: document.getElementById('cudaVersionRow'),
+    gpuCount: document.getElementById('gpuCount'),
+    gpuCountRow: document.getElementById('gpuCountRow'),
     gpuName: document.getElementById('gpuName'),
     gpuNameRow: document.getElementById('gpuNameRow'),
+    gpuMemory: document.getElementById('gpuMemory'),
+    gpuMemoryRow: document.getElementById('gpuMemoryRow'),
     suryaDevice: document.getElementById('suryaDevice'),
     clipDevice: document.getElementById('clipDevice')
 };
@@ -831,12 +835,18 @@ function updateDeviceInfoUI(info) {
         elements.selectedDevice.className = 'device-value ' + getDeviceStatusClass(info.selected_device || 'cpu');
     }
     
-    // Update CUDA info (show only if CUDA available)
+    // Update CUDA/NVIDIA info (show only if CUDA available)
     if (info.cuda_available) {
         if (elements.cudaVersionRow) elements.cudaVersionRow.style.display = 'flex';
         if (elements.cudaVersion) elements.cudaVersion.textContent = info.cuda_version || '-';
+        if (elements.gpuCountRow) elements.gpuCountRow.style.display = 'flex';
+        if (elements.gpuCount) elements.gpuCount.textContent = info.gpu_count || '-';
         if (elements.gpuNameRow) elements.gpuNameRow.style.display = 'flex';
         if (elements.gpuName) elements.gpuName.textContent = info.gpu_name || '-';
+        if (info.gpu_memory_total) {
+            if (elements.gpuMemoryRow) elements.gpuMemoryRow.style.display = 'flex';
+            if (elements.gpuMemory) elements.gpuMemory.textContent = info.gpu_memory_total;
+        }
     }
     
     // Update Surya device
@@ -861,10 +871,18 @@ function updateDeviceInfoUI(info) {
     const hasGpu = info.cuda_available || info.mps_available;
     const activeDevice = info.surya_device || info.clip_device;
     if (activeDevice && (activeDevice.includes('cuda') || activeDevice.includes('mps'))) {
-        elements.deviceInfoStatus.textContent = info.mps_available ? 'MPS Active' : 'CUDA Active';
+        if (info.cuda_available) {
+            elements.deviceInfoStatus.textContent = 'CUDA Active';
+        } else {
+            elements.deviceInfoStatus.textContent = 'MPS Active';
+        }
         elements.deviceInfoStatus.className = 'device-info-status status-gpu';
     } else if (hasGpu) {
-        elements.deviceInfoStatus.textContent = info.mps_available ? 'MPS Ready' : 'CUDA Ready';
+        if (info.cuda_available) {
+            elements.deviceInfoStatus.textContent = 'CUDA Ready';
+        } else {
+            elements.deviceInfoStatus.textContent = 'MPS Ready';
+        }
         elements.deviceInfoStatus.className = 'device-info-status status-available';
     } else {
         elements.deviceInfoStatus.textContent = 'CPU Only';
