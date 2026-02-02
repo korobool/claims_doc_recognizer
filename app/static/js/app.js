@@ -838,14 +838,20 @@ function updateDeviceInfoUI(info) {
     
     // Update Surya device
     if (elements.suryaDevice) {
-        elements.suryaDevice.textContent = info.surya_device || 'Not initialized';
+        elements.suryaDevice.textContent = info.surya_device || 'Pending';
         elements.suryaDevice.className = 'device-value ' + (info.surya_device ? getDeviceStatusClass(info.surya_device) : 'status-pending');
     }
     
     // Update CLIP device
     if (elements.clipDevice) {
-        elements.clipDevice.textContent = info.clip_device || 'Not initialized';
+        elements.clipDevice.textContent = info.clip_device || 'Pending';
         elements.clipDevice.className = 'device-value ' + (info.clip_device ? getDeviceStatusClass(info.clip_device) : 'status-pending');
+    }
+    
+    // Hide note if models are initialized
+    const noteEl = document.getElementById('deviceInfoNote');
+    if (noteEl && info.surya_device && info.clip_device) {
+        noteEl.style.display = 'none';
     }
     
     // Update status summary in header

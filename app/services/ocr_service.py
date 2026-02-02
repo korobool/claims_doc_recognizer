@@ -78,14 +78,14 @@ def print_device_info():
         print(f"GPU Name: {info['gpu_name']}")
     elif info['mps_available']:
         print(f"GPU ACCELERATION: MPS (Apple Silicon)")
-        print(f"Metal Performance Shaders enabled")
+        print(f"Metal Performance Shaders: ENABLED")
     else:
         print(f"GPU ACCELERATION: None (CPU only)")
     
     print(f"")
-    print(f"Selected Device: {device}")
-    print(f"Surya OCR Device: {info['surya_device'] or 'Not initialized yet'}")
-    print(f"CLIP Device: {info['clip_device'] or 'Not initialized yet'}")
+    print(f"PyTorch Device: {device}")
+    print(f"")
+    print(f"Models will use {device} when initialized on first request.")
     print("="*60 + "\n")
 
 # Class descriptions for CLIP zero-shot classification

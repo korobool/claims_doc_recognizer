@@ -68,11 +68,11 @@
                 </div>
                 <div class="device-info-details" id="deviceInfoDetails" style="display: none;">
                     <div class="device-info-row acceleration-row">
-                        <span class="device-label">Type:</span>
+                        <span class="device-label">Acceleration:</span>
                         <span class="device-value" id="accelerationType">-</span>
                     </div>
                     <div class="device-info-row">
-                        <span class="device-label">Selected Device:</span>
+                        <span class="device-label">PyTorch Device:</span>
                         <span class="device-value" id="selectedDevice">-</span>
                     </div>
                     <div class="device-info-row" id="cudaVersionRow" style="display: none;">
@@ -83,14 +83,16 @@
                         <span class="device-label">GPU:</span>
                         <span class="device-value" id="gpuName">-</span>
                     </div>
+                    <div class="device-info-separator"></div>
                     <div class="device-info-row">
                         <span class="device-label">Surya OCR:</span>
-                        <span class="device-value" id="suryaDevice">Not initialized</span>
+                        <span class="device-value" id="suryaDevice">Pending</span>
                     </div>
                     <div class="device-info-row">
                         <span class="device-label">CLIP:</span>
-                        <span class="device-value" id="clipDevice">Not initialized</span>
+                        <span class="device-value" id="clipDevice">Pending</span>
                     </div>
+                    <div class="device-info-note" id="deviceInfoNote">Models load on first recognition</div>
                 </div>
             </div>
             <div class="document-class-container" id="documentClassContainer" style="display: none;">
@@ -112,6 +114,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=2"></script>
+    <script src="/static/js/app.js?v=3"></script>
 </body>
 </html>

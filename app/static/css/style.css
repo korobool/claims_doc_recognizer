@@ -631,3 +631,15 @@ body {
 .acceleration-row .device-value {
     font-weight: 600;
 }
+
+.device-info-separator {
+    border-top: 1px solid #334155;
+    margin: 8px 0;
+}
+
+.device-info-note {
+    font-size: 11px;
+    color: #64748b;
+    font-style: italic;
+    margin-top: 8px;
+}
