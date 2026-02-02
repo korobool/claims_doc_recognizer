@@ -1,4 +1,4 @@
-# Document Recognition System 
+# Document Recognition System PoC with high level of security compliance
 *Mini-POC using [Surya](https://github.com/datalab-to/surya). 
 General idea is to be able to demo local inference capabilities and simplicity so that OCR can be practically done without external APIs.*
 
