@@ -48,22 +48,44 @@ def get_device_info() -> dict:
     # Update MPS info (Apple Silicon)
     _device_info["mps_available"] = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
     
+    # Determine acceleration type
+    if _device_info["cuda_available"]:
+        _device_info["acceleration_type"] = "CUDA (NVIDIA GPU)"
+    elif _device_info["mps_available"]:
+        _device_info["acceleration_type"] = "MPS (Apple Silicon)"
+    else:
+        _device_info["acceleration_type"] = "CPU Only"
+    
+    # Selected device
+    _device_info["selected_device"] = str(get_device())
+    
     return _device_info.copy()
 
 
 def print_device_info():
     """Print device information to stdout."""
     info = get_device_info()
+    device = get_device()
+    
     print("\n" + "="*60)
     print("DEVICE DETECTION RESULTS")
     print("="*60)
-    print(f"CUDA Available: {info['cuda_available']}")
+    
+    # Determine acceleration type
     if info['cuda_available']:
+        print(f"GPU ACCELERATION: CUDA (NVIDIA)")
         print(f"CUDA Version: {info['cuda_version']}")
         print(f"GPU Name: {info['gpu_name']}")
-    print(f"MPS Available (Apple Silicon): {info['mps_available']}")
-    print(f"Surya OCR Device: {info['surya_device'] or 'Not initialized'}")
-    print(f"CLIP Device: {info['clip_device'] or 'Not initialized'}")
+    elif info['mps_available']:
+        print(f"GPU ACCELERATION: MPS (Apple Silicon)")
+        print(f"Metal Performance Shaders enabled")
+    else:
+        print(f"GPU ACCELERATION: None (CPU only)")
+    
+    print(f"")
+    print(f"Selected Device: {device}")
+    print(f"Surya OCR Device: {info['surya_device'] or 'Not initialized yet'}")
+    print(f"CLIP Device: {info['clip_device'] or 'Not initialized yet'}")
     print("="*60 + "\n")
 
 # Class descriptions for CLIP zero-shot classification

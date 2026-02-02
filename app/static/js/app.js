@@ -39,12 +39,12 @@ const elements = {
     deviceInfoStatus: document.getElementById('deviceInfoStatus'),
     deviceInfoDetails: document.getElementById('deviceInfoDetails'),
     deviceInfoToggle: document.getElementById('deviceInfoToggle'),
-    cudaAvailable: document.getElementById('cudaAvailable'),
+    accelerationType: document.getElementById('accelerationType'),
+    selectedDevice: document.getElementById('selectedDevice'),
     cudaVersion: document.getElementById('cudaVersion'),
     cudaVersionRow: document.getElementById('cudaVersionRow'),
     gpuName: document.getElementById('gpuName'),
     gpuNameRow: document.getElementById('gpuNameRow'),
-    mpsAvailable: document.getElementById('mpsAvailable'),
     suryaDevice: document.getElementById('suryaDevice'),
     clipDevice: document.getElementById('clipDevice')
 };
@@ -794,57 +794,64 @@ async function fetchDeviceInfo() {
             throw new Error('Failed to fetch device info');
         }
         const info = await response.json();
+        console.log('Device info received:', info);
         updateDeviceInfoUI(info);
     } catch (error) {
         console.error('Error fetching device info:', error);
-        elements.deviceInfoStatus.textContent = 'Error';
-        elements.deviceInfoStatus.className = 'device-info-status status-error';
+        if (elements.deviceInfoStatus) {
+            elements.deviceInfoStatus.textContent = 'Error';
+            elements.deviceInfoStatus.className = 'device-info-status status-error';
+        }
     }
 }
 
 function updateDeviceInfoUI(info) {
-    // Update CUDA info
-    if (info.cuda_available) {
-        elements.cudaAvailable.textContent = 'Yes';
-        elements.cudaAvailable.className = 'device-value status-gpu';
-        elements.cudaVersionRow.style.display = 'flex';
-        elements.cudaVersion.textContent = info.cuda_version || '-';
-        elements.gpuNameRow.style.display = 'flex';
-        elements.gpuName.textContent = info.gpu_name || '-';
-    } else {
-        elements.cudaAvailable.textContent = 'No';
-        elements.cudaAvailable.className = 'device-value status-cpu';
+    if (!elements.deviceInfoStatus) {
+        console.error('Device info elements not found in DOM');
+        return;
     }
     
-    // Update MPS info
-    if (info.mps_available) {
-        elements.mpsAvailable.textContent = 'Yes';
-        elements.mpsAvailable.className = 'device-value status-gpu';
-    } else {
-        elements.mpsAvailable.textContent = 'No';
-        elements.mpsAvailable.className = 'device-value status-cpu';
+    // Update acceleration type
+    if (elements.accelerationType) {
+        elements.accelerationType.textContent = info.acceleration_type || 'Unknown';
+        const isGpu = info.cuda_available || info.mps_available;
+        elements.accelerationType.className = 'device-value ' + (isGpu ? 'status-gpu' : 'status-cpu');
+    }
+    
+    // Update selected device
+    if (elements.selectedDevice) {
+        elements.selectedDevice.textContent = info.selected_device || '-';
+        elements.selectedDevice.className = 'device-value ' + getDeviceStatusClass(info.selected_device || 'cpu');
+    }
+    
+    // Update CUDA info (show only if CUDA available)
+    if (info.cuda_available) {
+        if (elements.cudaVersionRow) elements.cudaVersionRow.style.display = 'flex';
+        if (elements.cudaVersion) elements.cudaVersion.textContent = info.cuda_version || '-';
+        if (elements.gpuNameRow) elements.gpuNameRow.style.display = 'flex';
+        if (elements.gpuName) elements.gpuName.textContent = info.gpu_name || '-';
     }
     
     // Update Surya device
-    if (info.surya_device) {
-        elements.suryaDevice.textContent = info.surya_device;
-        elements.suryaDevice.className = 'device-value ' + getDeviceStatusClass(info.surya_device);
+    if (elements.suryaDevice) {
+        elements.suryaDevice.textContent = info.surya_device || 'Not initialized';
+        elements.suryaDevice.className = 'device-value ' + (info.surya_device ? getDeviceStatusClass(info.surya_device) : 'status-pending');
     }
     
     // Update CLIP device
-    if (info.clip_device) {
-        elements.clipDevice.textContent = info.clip_device;
-        elements.clipDevice.className = 'device-value ' + getDeviceStatusClass(info.clip_device);
+    if (elements.clipDevice) {
+        elements.clipDevice.textContent = info.clip_device || 'Not initialized';
+        elements.clipDevice.className = 'device-value ' + (info.clip_device ? getDeviceStatusClass(info.clip_device) : 'status-pending');
     }
     
-    // Update status summary
+    // Update status summary in header
     const hasGpu = info.cuda_available || info.mps_available;
     const activeDevice = info.surya_device || info.clip_device;
     if (activeDevice && (activeDevice.includes('cuda') || activeDevice.includes('mps'))) {
-        elements.deviceInfoStatus.textContent = 'GPU Active';
+        elements.deviceInfoStatus.textContent = info.mps_available ? 'MPS Active' : 'CUDA Active';
         elements.deviceInfoStatus.className = 'device-info-status status-gpu';
     } else if (hasGpu) {
-        elements.deviceInfoStatus.textContent = 'GPU Available';
+        elements.deviceInfoStatus.textContent = info.mps_available ? 'MPS Ready' : 'CUDA Ready';
         elements.deviceInfoStatus.className = 'device-info-status status-available';
     } else {
         elements.deviceInfoStatus.textContent = 'CPU Only';
