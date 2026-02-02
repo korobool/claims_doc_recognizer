@@ -1,5 +1,5 @@
 # Document Recognition System 
-Mini-POC using [Surya](https://github.com/datalab-to/surya)
+*Mini-POC using [Surya](https://github.com/datalab-to/surya). General idea is to be able to demo local inference capabilities and simplicity so that OCR can be practically done without external APIs.*
 ![Pipeline](pipeline.png)
 
 
