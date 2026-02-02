@@ -995,6 +995,9 @@ async function checkLlmStatus() {
         const data = await response.json();
         state.llmStatus.ollamaAvailable = data.ollama_available;
         state.llmStatus.models = data.models;
+        state.llmStatus.acceleration = data.acceleration;
+        state.llmStatus.accelerationDetails = data.acceleration_details;
+        state.llmStatus.version = data.version;
         
         updateLlmStatusUI();
     } catch (error) {
@@ -1005,7 +1008,7 @@ async function checkLlmStatus() {
 }
 
 function updateLlmStatusUI() {
-    const { ollamaAvailable, models } = state.llmStatus;
+    const { ollamaAvailable, models, acceleration, accelerationDetails } = state.llmStatus;
     
     // Update status indicator
     if (elements.ollamaStatus) {
@@ -1014,6 +1017,33 @@ function updateLlmStatusUI() {
     }
     if (elements.ollamaStatusText) {
         elements.ollamaStatusText.textContent = ollamaAvailable ? 'Ollama Connected' : 'Ollama Offline';
+    }
+    
+    // Update acceleration display
+    const accelContainer = document.getElementById('llmAcceleration');
+    const accelIcon = document.getElementById('accelIcon');
+    const accelText = document.getElementById('accelText');
+    
+    if (accelContainer && accelIcon && accelText) {
+        accelContainer.className = 'llm-acceleration';
+        
+        if (acceleration === 'metal') {
+            accelContainer.classList.add('metal');
+            accelIcon.textContent = '🍎';
+            accelText.textContent = accelerationDetails || 'Metal (Apple Silicon)';
+        } else if (acceleration === 'cuda') {
+            accelContainer.classList.add('cuda');
+            accelIcon.textContent = '🟢';
+            accelText.textContent = accelerationDetails || 'CUDA (NVIDIA GPU)';
+        } else if (acceleration === 'rocm') {
+            accelContainer.classList.add('cuda');
+            accelIcon.textContent = '🔴';
+            accelText.textContent = accelerationDetails || 'ROCm (AMD GPU)';
+        } else {
+            accelContainer.classList.add('cpu');
+            accelIcon.textContent = '💻';
+            accelText.textContent = accelerationDetails || 'CPU Only';
+        }
     }
     
     // Update model select
@@ -1083,24 +1113,92 @@ async function pullSelectedModel() {
     elements.pullModelBtn.disabled = true;
     elements.pullModelBtn.textContent = '⏳';
     
+    // Show progress bar
+    const progressContainer = document.getElementById('pullProgress');
+    const progressFill = document.getElementById('pullProgressFill');
+    const progressText = document.getElementById('pullProgressText');
+    
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '0%';
+        progressText.textContent = 'Starting download...';
+    }
+    
     try {
-        const response = await fetch(`/api/llm/pull/${encodeURIComponent(modelId)}`, {
-            method: 'POST'
-        });
+        // Use streaming endpoint for progress updates
+        const eventSource = new EventSource(`/api/llm/pull/${encodeURIComponent(modelId)}/stream`);
         
-        if (!response.ok) throw new Error('Failed to pull model');
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.status === 'already_available') {
+                    progressText.textContent = 'Model already available';
+                    progressFill.style.width = '100%';
+                    eventSource.close();
+                    setTimeout(() => finishPull(true), 500);
+                    return;
+                }
+                
+                if (data.status === 'complete') {
+                    progressText.textContent = 'Download complete!';
+                    progressFill.style.width = '100%';
+                    eventSource.close();
+                    setTimeout(() => finishPull(true), 500);
+                    return;
+                }
+                
+                if (data.status === 'error') {
+                    progressText.textContent = 'Error: ' + (data.error || 'Unknown error');
+                    eventSource.close();
+                    setTimeout(() => finishPull(false), 2000);
+                    return;
+                }
+                
+                // Update progress
+                if (data.total && data.completed) {
+                    const percent = Math.round((data.completed / data.total) * 100);
+                    progressFill.style.width = percent + '%';
+                    
+                    // Format size
+                    const completedMB = (data.completed / 1024 / 1024).toFixed(1);
+                    const totalMB = (data.total / 1024 / 1024).toFixed(1);
+                    progressText.textContent = `Downloading: ${completedMB} MB / ${totalMB} MB (${percent}%)`;
+                } else if (data.status) {
+                    progressText.textContent = data.status;
+                }
+            } catch (e) {
+                console.error('Error parsing progress:', e);
+            }
+        };
         
-        const data = await response.json();
-        console.log('Model pull result:', data);
-        
-        // Refresh status
-        await checkLlmStatus();
+        eventSource.onerror = (error) => {
+            console.error('EventSource error:', error);
+            eventSource.close();
+            finishPull(false);
+        };
         
     } catch (error) {
         console.error('Model pull failed:', error);
         alert('Failed to pull model: ' + error.message);
-    } finally {
+        finishPull(false);
+    }
+    
+    async function finishPull(success) {
         elements.pullModelBtn.textContent = '⬇️';
+        
+        if (progressContainer) {
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+            }, 1000);
+        }
+        
+        // Refresh status
+        await checkLlmStatus();
+        
+        if (!success) {
+            alert('Failed to pull model');
+        }
     }
 }
 

@@ -1,9 +1,11 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 import uuid
 import os
+import json
+import httpx
 
 from app.services.ocr_service import recognize_text, recognize_region, get_device_info
 from app.services.image_service import normalize_image
@@ -61,6 +63,9 @@ class LLMModelInfo(BaseModel):
 class LLMStatusResponse(BaseModel):
     ollama_available: bool
     models: List[LLMModelInfo]
+    acceleration: str = "unknown"
+    acceleration_details: Optional[str] = None
+    version: Optional[str] = None
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -179,9 +184,12 @@ async def device_info():
 
 @router.get("/llm/status", response_model=LLMStatusResponse)
 async def llm_status():
-    """Check LLM service status and available models."""
+    """Check LLM service status, available models, and acceleration info."""
     client = get_ollama_client()
-    ollama_available = await client.is_available()
+    
+    # Get system info including acceleration
+    system_info = await client.get_system_info()
+    ollama_available = system_info.get("available", False)
     
     models = []
     available_models = await client.list_models() if ollama_available else []
@@ -197,7 +205,10 @@ async def llm_status():
     
     return LLMStatusResponse(
         ollama_available=ollama_available,
-        models=models
+        models=models,
+        acceleration=system_info.get("acceleration", "unknown"),
+        acceleration_details=system_info.get("acceleration_details"),
+        version=system_info.get("version")
     )
 
 
@@ -223,6 +234,53 @@ async def llm_pull_model(model_id: str):
         return {"status": "pulled", "model": model.display_name}
     else:
         raise HTTPException(status_code=500, detail=f"Failed to pull model {model.display_name}")
+
+
+@router.get("/llm/pull/{model_id}/stream")
+async def llm_pull_model_stream(model_id: str):
+    """Pull a model with streaming progress updates."""
+    client = get_ollama_client()
+    
+    if not await client.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    model = LLMModel.from_string(model_id)
+    
+    # Check if already available
+    if await client.is_model_available(model):
+        async def already_available():
+            yield f"data: {json.dumps({'status': 'already_available', 'model': model.display_name})}\n\n"
+        return StreamingResponse(already_available(), media_type="text/event-stream")
+    
+    async def pull_stream() -> AsyncGenerator[str, None]:
+        """Stream pull progress as Server-Sent Events."""
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as http_client:
+                async with http_client.stream(
+                    "POST",
+                    f"{client.base_url}/api/pull",
+                    json={"name": model.value}
+                ) as response:
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'status': 'error', 'error': 'Failed to start pull'})}\n\n"
+                        return
+                    
+                    async for line in response.aiter_lines():
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                # Add model info to the progress data
+                                data["model"] = model.display_name
+                                data["model_id"] = model.value
+                                yield f"data: {json.dumps(data)}\n\n"
+                            except json.JSONDecodeError:
+                                pass
+                    
+                    yield f"data: {json.dumps({'status': 'complete', 'model': model.display_name})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(pull_stream(), media_type="text/event-stream")
 
 
 @router.post("/llm/process")

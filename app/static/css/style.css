@@ -936,3 +936,65 @@ body {
 .llm-doc-type {
     text-align: right;
 }
+
+/* Acceleration Display */
+.llm-acceleration {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 4px 8px;
+    background: #1a1a2e;
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+.accel-icon {
+    font-size: 14px;
+}
+
+.llm-acceleration.metal {
+    background: linear-gradient(135deg, #2d4a7c 0%, #1a365d 100%);
+    border: 1px solid #4a9eff;
+}
+
+.llm-acceleration.cuda {
+    background: linear-gradient(135deg, #2d7c4a 0%, #1a5d36 100%);
+    border: 1px solid #76b900;
+}
+
+.llm-acceleration.cpu {
+    background: #2a2a3e;
+    border: 1px solid #555;
+    color: #888;
+}
+
+/* Pull Progress */
+.pull-progress {
+    width: 100%;
+    margin: 8px 0;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #1a1a2e;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4a9eff 0%, #76b900 100%);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.progress-text {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    margin-top: 4px;
+    text-align: center;
+}

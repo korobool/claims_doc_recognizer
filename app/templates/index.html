@@ -146,6 +146,10 @@
                         <span class="status-indicator" id="ollamaStatus">⚪</span>
                         <span id="ollamaStatusText">Checking Ollama...</span>
                     </div>
+                    <div class="llm-acceleration" id="llmAcceleration">
+                        <span class="accel-icon" id="accelIcon">⚡</span>
+                        <span id="accelText">Checking acceleration...</span>
+                    </div>
                     <div class="llm-model-select">
                         <label for="llmModelSelect">Model:</label>
                         <select id="llmModelSelect" disabled>
@@ -154,6 +158,12 @@
                         <button class="btn btn-small" id="pullModelBtn" disabled title="Pull model if not available">
                             ⬇️
                         </button>
+                    </div>
+                    <div class="pull-progress" id="pullProgress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="pullProgressFill"></div>
+                        </div>
+                        <span class="progress-text" id="pullProgressText">Downloading...</span>
                     </div>
                     <button class="btn btn-primary" id="processLlmBtn" disabled>
                         🔄 Process with LLM
@@ -194,6 +204,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=12"></script>
+    <script src="/static/js/app.js?v=13"></script>
 </body>
 </html>

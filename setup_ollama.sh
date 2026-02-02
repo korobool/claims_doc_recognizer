@@ -38,6 +38,86 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Check hardware acceleration
+check_acceleration() {
+    print_status "Checking hardware acceleration..."
+    
+    OS="$(uname -s)"
+    
+    case "$OS" in
+        Darwin)
+            # Check for Apple Silicon (MPS)
+            CHIP=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "")
+            if [[ "$CHIP" == *"Apple"* ]]; then
+                print_success "Apple Silicon detected - Metal Performance Shaders (MPS) available"
+                echo "  Chip: $CHIP"
+                return 0
+            fi
+            
+            # Check for Intel Mac with AMD GPU
+            GPU=$(system_profiler SPDisplaysDataType 2>/dev/null | grep "Chipset Model" | head -1 || echo "")
+            if [ -n "$GPU" ]; then
+                print_success "GPU detected: $GPU"
+                return 0
+            fi
+            ;;
+        Linux)
+            # Check for NVIDIA GPU
+            if command -v nvidia-smi &> /dev/null; then
+                GPU_INFO=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "")
+                if [ -n "$GPU_INFO" ]; then
+                    print_success "NVIDIA GPU detected - CUDA available"
+                    echo "  GPU: $GPU_INFO"
+                    return 0
+                fi
+            fi
+            
+            # Check for AMD GPU (ROCm)
+            if command -v rocm-smi &> /dev/null; then
+                print_success "AMD GPU detected - ROCm available"
+                return 0
+            fi
+            
+            # Check for Intel GPU
+            if [ -d "/dev/dri" ]; then
+                print_warning "Intel GPU may be available (OpenCL)"
+                return 0
+            fi
+            ;;
+    esac
+    
+    print_warning "No GPU acceleration detected - Ollama will use CPU only"
+    print_status "For better performance, consider using a machine with GPU support"
+    return 1
+}
+
+# Verify Ollama is using acceleration
+verify_ollama_acceleration() {
+    print_status "Verifying Ollama acceleration status..."
+    
+    # Query Ollama for its compute info
+    COMPUTE_INFO=$(curl -s http://localhost:11434/api/tags 2>/dev/null)
+    
+    # Check Ollama logs for acceleration info
+    if [ -f /tmp/ollama.log ]; then
+        if grep -q "metal" /tmp/ollama.log 2>/dev/null; then
+            print_success "Ollama is using Metal (Apple Silicon) acceleration"
+            return 0
+        elif grep -q "cuda" /tmp/ollama.log 2>/dev/null; then
+            print_success "Ollama is using CUDA (NVIDIA) acceleration"
+            return 0
+        elif grep -q "rocm" /tmp/ollama.log 2>/dev/null; then
+            print_success "Ollama is using ROCm (AMD) acceleration"
+            return 0
+        fi
+    fi
+    
+    # Try to get info from a running model
+    # This is a lightweight check - just see if Ollama reports GPU usage
+    print_status "Acceleration status will be confirmed when a model is loaded"
+    return 0
+}
+
 # Check if Ollama is installed
 check_ollama_installed() {
     print_status "Checking if Ollama is installed..."
@@ -274,10 +354,16 @@ main() {
         fi
     fi
     
-    # Step 2: Check/Start Ollama server
+    # Step 2: Check hardware acceleration
+    check_acceleration
+    
+    # Step 3: Check/Start Ollama server
     if ! check_ollama_running; then
         start_ollama
     fi
+    
+    # Step 4: Verify Ollama is using acceleration
+    verify_ollama_acceleration
     
     # Status only mode
     if [ "$STATUS_ONLY" = true ]; then

@@ -82,6 +82,80 @@ class OllamaClient:
         except Exception:
             return False
     
+    async def get_system_info(self) -> Dict[str, Any]:
+        """Get Ollama system info including acceleration status."""
+        info = {
+            "available": False,
+            "acceleration": "unknown",
+            "acceleration_details": None,
+            "version": None
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # Check if available
+                response = await client.get(f"{self.base_url}/api/tags")
+                if response.status_code == 200:
+                    info["available"] = True
+                
+                # Try to get version
+                try:
+                    ver_response = await client.get(f"{self.base_url}/api/version")
+                    if ver_response.status_code == 200:
+                        info["version"] = ver_response.json().get("version")
+                except:
+                    pass
+                
+                # Detect acceleration by checking a lightweight generate call
+                # or by checking system capabilities
+                import platform
+                system = platform.system()
+                
+                if system == "Darwin":
+                    # macOS - check for Apple Silicon
+                    import subprocess
+                    try:
+                        chip = subprocess.check_output(
+                            ["sysctl", "-n", "machdep.cpu.brand_string"],
+                            stderr=subprocess.DEVNULL
+                        ).decode().strip()
+                        if "Apple" in chip:
+                            info["acceleration"] = "metal"
+                            info["acceleration_details"] = f"Apple Silicon ({chip})"
+                        else:
+                            info["acceleration"] = "cpu"
+                            info["acceleration_details"] = f"Intel Mac ({chip})"
+                    except:
+                        info["acceleration"] = "unknown"
+                        
+                elif system == "Linux":
+                    # Linux - check for NVIDIA GPU
+                    import subprocess
+                    try:
+                        nvidia_info = subprocess.check_output(
+                            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                            stderr=subprocess.DEVNULL
+                        ).decode().strip()
+                        if nvidia_info:
+                            info["acceleration"] = "cuda"
+                            info["acceleration_details"] = nvidia_info
+                    except:
+                        # Check for ROCm (AMD)
+                        try:
+                            subprocess.check_output(["rocm-smi"], stderr=subprocess.DEVNULL)
+                            info["acceleration"] = "rocm"
+                            info["acceleration_details"] = "AMD GPU (ROCm)"
+                        except:
+                            info["acceleration"] = "cpu"
+                            info["acceleration_details"] = "No GPU detected"
+                else:
+                    info["acceleration"] = "cpu"
+                    
+        except Exception as e:
+            print(f"[LLM] Error getting system info: {e}")
+        
+        return info
+    
     async def list_models(self) -> List[str]:
         """List available models in Ollama."""
         try:
