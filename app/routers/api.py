@@ -577,9 +577,120 @@ async def delete_schema(type_id: str):
     return {"status": "deleted", "type_id": type_id}
 
 
+@router.post("/schemas/generate/stream")
+async def generate_schema_with_llm_stream(request: GenerateSchemaRequest):
+    """Generate a new schema using LLM with streaming output."""
+    client = get_ollama_client()
+    
+    if not await client.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    # Get model ID - handle both predefined and custom models
+    model_id = None
+    if request.model:
+        # Try to match to predefined model first
+        for m in LLMModel:
+            if m.value.lower() == request.model.lower():
+                model_id = m.value
+                break
+        if model_id is None:
+            model_id = request.model  # Use as custom model ID
+    else:
+        model_id = LLMModel.DEVSTRAL.value  # Default model
+    
+    prompt = f"""Generate a document schema YAML for the following document type:
+
+USER DESCRIPTION:
+{request.description}
+
+Generate a YAML schema with:
+1. type_id: a short lowercase identifier (e.g., "invoice", "medical_report")
+2. display_name: human-readable name
+3. clip_prompts: 2-3 prompts for image classification
+4. keywords: 5-10 keywords that appear in this document type
+5. llm_context: brief instructions for extracting data from this document type, including common OCR errors to fix
+6. fields: list of fields to extract, each with name, type (text/date/currency/list/number), description, required (true/false)
+
+For list-type fields, describe what each item should contain in the description.
+
+Return ONLY valid YAML, no explanations:"""
+
+    print(f"[Schema] Streaming schema generation for: {request.description[:50]}...")
+    
+    async def stream_generate() -> AsyncGenerator[str, None]:
+        """Stream LLM generation as Server-Sent Events."""
+        full_response = ""
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as http_client:
+                async with http_client.stream(
+                    "POST",
+                    f"{client.base_url}/api/generate",
+                    json={
+                        "model": model_id,
+                        "prompt": prompt,
+                        "stream": True,
+                        "options": {
+                            "temperature": 0.3,
+                            "num_predict": 2048,
+                        }
+                    }
+                ) as response:
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'error': 'Failed to start generation'})}\n\n"
+                        return
+                    
+                    async for line in response.aiter_lines():
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                token = data.get("response", "")
+                                full_response += token
+                                
+                                # Send token to client
+                                yield f"data: {json.dumps({'token': token})}\n\n"
+                                
+                                if data.get("done"):
+                                    break
+                            except json.JSONDecodeError:
+                                pass
+            
+            # Process final result
+            yaml_content = full_response.strip()
+            if yaml_content.startswith("```"):
+                lines = yaml_content.split("\n")
+                yaml_lines = []
+                in_yaml = False
+                for line in lines:
+                    if line.startswith("```") and not in_yaml:
+                        in_yaml = True
+                        continue
+                    elif line.startswith("```") and in_yaml:
+                        break
+                    elif in_yaml:
+                        yaml_lines.append(line)
+                yaml_content = "\n".join(yaml_lines)
+            
+            # Validate and send final result
+            import yaml
+            try:
+                data = yaml.safe_load(yaml_content)
+                if data and isinstance(data, dict):
+                    yield f"data: {json.dumps({'done': True, 'yaml': yaml_content, 'type_id': data.get('type_id', 'new_schema'), 'display_name': data.get('display_name', 'New Schema')})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'done': True, 'yaml': yaml_content, 'error': 'Invalid YAML structure'})}\n\n"
+            except yaml.YAMLError as e:
+                yield f"data: {json.dumps({'done': True, 'yaml': full_response, 'error': f'YAML parse error: {str(e)}'})}\n\n"
+                
+        except Exception as e:
+            print(f"[Schema] Stream error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(stream_generate(), media_type="text/event-stream")
+
+
 @router.post("/schemas/generate")
 async def generate_schema_with_llm(request: GenerateSchemaRequest):
-    """Generate a new schema using LLM based on user description."""
+    """Generate a new schema using LLM based on user description (non-streaming)."""
     client = get_ollama_client()
     
     if not await client.is_available():

@@ -1664,12 +1664,19 @@ async function generateSchemaWithLLM() {
     
     const modelId = document.getElementById('schemaLlmModel').value;
     const generateBtn = document.getElementById('generateSchemaBtn');
+    const yamlEditor = document.getElementById('schemaYamlEditor');
     
     generateBtn.disabled = true;
     generateBtn.textContent = '⏳ Generating...';
     
+    // Show editor and clear it for streaming output
+    document.getElementById('schemaPlaceholder').style.display = 'none';
+    document.getElementById('schemaEditForm').style.display = 'flex';
+    document.getElementById('schemaEditorTitle').textContent = 'Generating...';
+    yamlEditor.value = '';
+    
     try {
-        const response = await fetch('/api/schemas/generate', {
+        const response = await fetch('/api/schemas/generate/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1683,25 +1690,66 @@ async function generateSchemaWithLLM() {
             throw new Error(error.detail || 'Generation failed');
         }
         
-        const data = await response.json();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
         
-        // Put generated YAML in editor
-        document.getElementById('schemaYamlEditor').value = data.yaml;
-        document.getElementById('schemaEditorTitle').textContent = data.display_name + ' (generated)';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        
+                        if (data.token) {
+                            // Append token to editor (streaming)
+                            yamlEditor.value += data.token;
+                            // Auto-scroll to bottom
+                            yamlEditor.scrollTop = yamlEditor.scrollHeight;
+                        }
+                        
+                        if (data.done) {
+                            // Final result - update with cleaned YAML
+                            if (data.yaml) {
+                                yamlEditor.value = data.yaml;
+                            }
+                            document.getElementById('schemaEditorTitle').textContent = 
+                                (data.display_name || 'New Schema') + ' (generated)';
+                            
+                            if (data.error) {
+                                console.warn('Schema generation warning:', data.error);
+                            }
+                            
+                            console.log('Schema generated:', data.type_id);
+                        }
+                    } catch (e) {
+                        if (e.message !== 'Unexpected end of JSON input') {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        }
+        
         state.schemaYamlDirty = true;
         state.selectedSchemaId = null;
         document.getElementById('saveSchemaBtn').disabled = false;
         document.getElementById('deleteSchemaBtn').disabled = true;
         
-        // Show editor if hidden
-        document.getElementById('schemaPlaceholder').style.display = 'none';
-        document.getElementById('schemaEditForm').style.display = 'flex';
-        
-        console.log('Schema generated:', data.type_id);
-        
     } catch (error) {
         console.error('Failed to generate schema:', error);
         alert('Failed to generate schema: ' + error.message);
+        yamlEditor.value = '# Generation failed: ' + error.message;
     } finally {
         generateBtn.disabled = false;
         generateBtn.textContent = '🤖 Generate';
