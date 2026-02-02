@@ -1,5 +1,5 @@
 # Document Recognition System 
-Mini-POC
+Mini-POC using [Surya](https://github.com/datalab-to/surya)
 ![Pipeline](pipeline.png)
 
 
