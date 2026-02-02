@@ -359,39 +359,61 @@ IMPORTANT: Always respond with valid JSON only. No explanations or commentary ou
     
     def _build_extraction_prompt(self, text: str, schema: DocumentSchema) -> str:
         """Build a context-aware extraction prompt based on document schema."""
-        # Build simple field descriptions
+        # Build detailed field descriptions with types
         field_descriptions = []
         for field in schema.fields:
-            req = "*" if field.required else ""
-            field_descriptions.append(f"  - {field.name}{req}: {field.description}")
+            req = " (REQUIRED)" if field.required else " (optional)"
+            field_type = f"[{field.type}]"
+            field_descriptions.append(f"  - {field.name} {field_type}{req}: {field.description}")
         
         fields_text = "\n".join(field_descriptions)
         
-        prompt = f"""DOCUMENT TYPE DETECTED: {schema.display_name.upper()}
+        # Build example JSON structure based on actual schema fields
+        example_fields = {}
+        for field in schema.fields:
+            if field.type == "list":
+                example_fields[field.name] = [{"name": "...", "details": "..."}]
+            elif field.type == "date":
+                example_fields[field.name] = "YYYY-MM-DD or null"
+            elif field.type == "currency":
+                example_fields[field.name] = "amount as string or null"
+            elif field.type == "number":
+                example_fields[field.name] = "number or null"
+            else:
+                example_fields[field.name] = "extracted value or null"
+        
+        import json
+        example_json = json.dumps(example_fields, indent=4)
+        
+        prompt = f"""=== DOCUMENT CLASSIFICATION ===
+This document has been classified as: **{schema.display_name.upper()}** (type_id: {schema.type_id})
 
+=== DOCUMENT TEMPLATE SCHEMA ===
+The following schema defines exactly what fields must be extracted from this {schema.display_name}:
+
+Document Type: {schema.display_name}
+Type ID: {schema.type_id}
+
+Fields to Extract (* = required):
+{fields_text}
+
+=== EXTRACTION CONTEXT ===
 {schema.llm_context}
 
 === RAW OCR TEXT (may contain errors) ===
 {text}
 === END OCR TEXT ===
 
-EXTRACT THESE FIELDS (* = required):
-{fields_text}
-
-IMPORTANT FOR LIST FIELDS:
-- For "medications" list: extract each medication with name, dosage, quantity, instructions
-- For "items" list: extract each item with name, quantity, price
+=== YOUR TASK ===
+1. This is CONFIRMED to be a {schema.display_name} document
+2. Extract ALL fields defined in the schema above
+3. Fix OCR errors in the text (character confusion, spacing issues)
+4. Return structured data matching the schema exactly
 
 Return ONLY this JSON (no other text):
 {{
-  "corrected_text": "OCR text with errors fixed",
-  "extracted_fields": {{
-    "field_name": "value or null",
-    "list_field": [
-      {{"name": "...", "dosage": "...", "quantity": "...", "instructions": "..."}},
-      ...
-    ]
-  }}
+  "corrected_text": "The full OCR text with errors corrected",
+  "extracted_fields": {example_json}
 }}"""
         
         return prompt
@@ -676,38 +698,60 @@ class GeminiPostProcessor:
     
     def _build_extraction_prompt(self, text: str, schema) -> str:
         """Build extraction prompt (same as Ollama version)."""
+        # Build detailed field descriptions with types
         field_descriptions = []
         for field in schema.fields:
-            req = "*" if field.required else ""
-            field_descriptions.append(f"  - {field.name}{req}: {field.description}")
+            req = " (REQUIRED)" if field.required else " (optional)"
+            field_type = f"[{field.type}]"
+            field_descriptions.append(f"  - {field.name} {field_type}{req}: {field.description}")
         
         fields_text = "\n".join(field_descriptions)
         
-        prompt = f"""DOCUMENT TYPE DETECTED: {schema.display_name.upper()}
+        # Build example JSON structure based on actual schema fields
+        example_fields = {}
+        for field in schema.fields:
+            if field.type == "list":
+                example_fields[field.name] = [{"name": "...", "details": "..."}]
+            elif field.type == "date":
+                example_fields[field.name] = "YYYY-MM-DD or null"
+            elif field.type == "currency":
+                example_fields[field.name] = "amount as string or null"
+            elif field.type == "number":
+                example_fields[field.name] = "number or null"
+            else:
+                example_fields[field.name] = "extracted value or null"
+        
+        example_json = json.dumps(example_fields, indent=4)
+        
+        prompt = f"""=== DOCUMENT CLASSIFICATION ===
+This document has been classified as: **{schema.display_name.upper()}** (type_id: {schema.type_id})
 
+=== DOCUMENT TEMPLATE SCHEMA ===
+The following schema defines exactly what fields must be extracted from this {schema.display_name}:
+
+Document Type: {schema.display_name}
+Type ID: {schema.type_id}
+
+Fields to Extract (* = required):
+{fields_text}
+
+=== EXTRACTION CONTEXT ===
 {schema.llm_context}
 
 === RAW OCR TEXT (may contain errors) ===
 {text}
 === END OCR TEXT ===
 
-EXTRACT THESE FIELDS (* = required):
-{fields_text}
-
-IMPORTANT FOR LIST FIELDS:
-- For "medications" list: extract each medication with name, dosage, quantity, instructions
-- For "items" list: extract each item with name, quantity, price
+=== YOUR TASK ===
+1. This is CONFIRMED to be a {schema.display_name} document
+2. Extract ALL fields defined in the schema above
+3. Fix OCR errors in the text (character confusion, spacing issues)
+4. Return structured data matching the schema exactly
 
 Return ONLY this JSON (no other text):
 {{
-  "corrected_text": "OCR text with errors fixed",
-  "extracted_fields": {{
-    "field_name": "value or null",
-    "list_field": [
-      {{"name": "...", "dosage": "...", "quantity": "...", "instructions": "..."}},
-      ...
-    ]
-  }}
+  "corrected_text": "The full OCR text with errors corrected",
+  "extracted_fields": {example_json}
 }}"""
         return prompt
     
