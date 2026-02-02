@@ -41,38 +41,55 @@ A **local, GPU-accelerated document recognition system** that:
 ### High-Level Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        USER INTERFACE                           │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │
-│  │  Upload  │  │  Preview │  │  Edit    │  │  Export JSON     │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      REST API (FastAPI)                         │
-│  /api/upload  /api/normalize  /api/recognize  /api/device-info  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      SERVICE LAYER                              │
-│  ┌─────────────────────┐    ┌─────────────────────────────────┐ │
-│  │   Image Service     │    │        OCR Service              │ │
-│  │   - Deskewing       │    │   - Text Recognition (Surya)    │ │
-│  │   - Normalization   │    │   - Classification (CLIP)       │ │
-│  │   - OpenCV          │    │   - Device Detection            │ │
-│  └─────────────────────┘    └─────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   HARDWARE ACCELERATION                         │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌──────────────┐  │
-│  │ Apple MPS │  │ NVIDIA    │  │ DGX Spark │  │ CPU Fallback │  │
-│  │ (Metal)   │  │ CUDA 12.x │  │ CUDA 13.0 │  │              │  │
-│  └───────────┘  └───────────┘  └───────────┘  └──────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           USER INTERFACE                                 │
+│  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │  Upload  │  │  Preview  │  │   LLM    │  │ Schemas  │  │ Settings │  │
+│  │          │  │  & Edit   │  │ Results  │  │Templates │  │          │  │
+│  └──────────┘  └───────────┘  └──────────┘  └──────────┘  └──────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         REST API (FastAPI)                               │
+│  /api/upload  /api/recognize  /api/llm/*  /api/schemas/*  /api/device   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          SERVICE LAYER                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
+│  │  Image Service  │  │   OCR Service   │  │      LLM Service        │  │
+│  │  - Deskewing    │  │  - Surya OCR    │  │  - Ollama Client        │  │
+│  │  - OpenCV       │  │  - CLIP Class.  │  │  - Gemini Client        │  │
+│  │                 │  │  - Hybrid Class │  │  - Schema-based Extract │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────────────┘  │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │                    Document Schema System                           │ │
+│  │  YAML Schemas → Field Definitions → LLM Prompts → Structured Data  │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      HARDWARE ACCELERATION                               │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌──────────────────────┐  │
+│  │ Apple MPS │  │ NVIDIA    │  │ DGX Spark │  │ CPU Fallback         │  │
+│  │ (Metal)   │  │ CUDA 12.x │  │ CUDA 13.0 │  │                      │  │
+│  └───────────┘  └───────────┘  └───────────┘  └──────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      LLM BACKENDS (Optional)                             │
+│  ┌─────────────────────────────┐  ┌─────────────────────────────────┐   │
+│  │  Ollama (Local)             │  │  Google Gemini (Cloud)          │   │
+│  │  - Devstral 24B             │  │  - Gemini 2.5 Pro               │   │
+│  │  - Qwen 2.5, Meditron       │  │  - API Key Required             │   │
+│  │  - Custom pulled models     │  │                                 │   │
+│  └─────────────────────────────┘  └─────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Breakdown
@@ -86,6 +103,9 @@ A **local, GPU-accelerated document recognition system** that:
   - Inline text editing for corrections
   - Region selection for partial OCR
   - JSON result visualization
+  - **LLM Results tab**: Structured field extraction display
+  - **Schema Templates tab**: View/edit/create document schemas
+  - **Settings tab**: LLM model selection and configuration
 
 #### Backend (Python FastAPI)
 - **Framework**: FastAPI with async support
@@ -98,6 +118,7 @@ A **local, GPU-accelerated document recognition system** that:
 #### Service Layer
 - **Image Service**: OpenCV-based image processing
 - **OCR Service**: AI model inference and hardware detection
+- **LLM Service**: Local and cloud LLM integration for post-processing
 
 ---
 
@@ -335,13 +356,17 @@ User uploads image
 └───────────────┘
 ```
 
-### JSON Output Structure
+### JSON Output Structure (OCR)
 
 ```json
 {
   "image_id": "abc123",
-  "document_class": "receipt",
-  "classification_confidence": 0.92,
+  "document_class": {
+    "class": "Receipt",
+    "type_id": "receipt",
+    "confidence": 0.92,
+    "method": "hybrid"
+  },
   "text_lines": [
     {
       "text": "ACME STORE",
@@ -359,8 +384,29 @@ User uploads image
       "confidence": 0.98
     }
   ],
-  "image_bbox": [0, 0, 800, 600],
-  "processing_time_ms": 1250
+  "image_bbox": [0, 0, 800, 600]
+}
+```
+
+### JSON Output Structure (LLM Extraction)
+
+```json
+{
+  "success": true,
+  "original_text": "ACME STORE\nDate: 2024-01-15\n...",
+  "corrected_text": "ACME STORE\nDate: 2024-01-15\n...",
+  "extracted_fields": {
+    "store_name": "ACME STORE",
+    "date": "2024-01-15",
+    "total": "$45.99",
+    "items": [
+      {"name": "Widget", "quantity": 2, "price": "$15.00"},
+      {"name": "Gadget", "quantity": 1, "price": "$15.99"}
+    ]
+  },
+  "document_type": "receipt",
+  "document_type_name": "Receipt / Invoice",
+  "model": "Devstral 24B"
 }
 ```
 
@@ -448,11 +494,11 @@ Server Start                First Recognition Request
 
 ### Key Privacy Features
 
-1. **No cloud dependency** - All inference runs locally
+1. **No cloud dependency** - All OCR and classification runs locally
 2. **No data transmission** - Documents never leave the device
-3. **No API keys required** - No third-party service integration
-4. **Offline capable** - Works without internet after initial setup
-5. **Self-hosted** - Full control over deployment
+3. **Offline capable** - Works without internet after initial setup
+4. **Self-hosted** - Full control over deployment
+5. **Optional cloud LLM** - Gemini API is opt-in only (requires explicit API key)
 
 ---
 
@@ -625,9 +671,11 @@ The Document Recognition System provides a complete, privacy-preserving solution
 1. **Local-first**: All processing on-device, no cloud dependency
 2. **Multi-platform GPU acceleration**: Mac, NVIDIA, DGX Spark
 3. **State-of-the-art accuracy**: Surya OCR + CLIP classification
-4. **Human-in-the-loop**: Interactive correction of OCR results
-5. **Zero-shot classification**: Add new document types without retraining
-6. **Production-ready**: FastAPI backend, modern frontend
+4. **LLM-powered extraction**: Structured data extraction with local or cloud LLMs
+5. **Schema-based processing**: YAML document schemas for customizable extraction
+6. **Human-in-the-loop**: Interactive correction of OCR results
+7. **Zero-shot classification**: Add new document types without retraining
+8. **Production-ready**: FastAPI backend, modern frontend
 
 ### Technology Stack Summary
 
@@ -639,6 +687,8 @@ The Document Recognition System provides a complete, privacy-preserving solution
 │ Backend     │ Python 3.10+, FastAPI, Uvicorn                    │
 │ OCR         │ Surya OCR (Vision Transformer)                    │
 │ Classify    │ OpenAI CLIP (ViT-B/32)                            │
+│ LLM Local   │ Ollama (Devstral, Qwen, Meditron, etc.)           │
+│ LLM Cloud   │ Google Gemini 2.5 Pro (optional)                  │
 │ Image Proc  │ OpenCV, Pillow                                    │
 │ ML Runtime  │ PyTorch 2.0+                                      │
 │ Acceleration│ CUDA (NVIDIA), MPS (Apple), CPU                   │
