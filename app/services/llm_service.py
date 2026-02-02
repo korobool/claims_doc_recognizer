@@ -363,7 +363,7 @@ IMPORTANT: Always respond with valid JSON only. No explanations or commentary ou
         field_descriptions = []
         for field in schema.fields:
             req = " (REQUIRED)" if field.required else " (optional)"
-            field_type = f"[{field.type}]"
+            field_type = f"[{field.field_type.value}]"
             field_descriptions.append(f"  - {field.name} {field_type}{req}: {field.description}")
         
         fields_text = "\n".join(field_descriptions)
@@ -371,13 +371,13 @@ IMPORTANT: Always respond with valid JSON only. No explanations or commentary ou
         # Build example JSON structure based on actual schema fields
         example_fields = {}
         for field in schema.fields:
-            if field.type == "list":
+            if field.field_type.value == "list":
                 example_fields[field.name] = [{"name": "...", "details": "..."}]
-            elif field.type == "date":
+            elif field.field_type.value == "date":
                 example_fields[field.name] = "YYYY-MM-DD or null"
-            elif field.type == "currency":
+            elif field.field_type.value == "currency":
                 example_fields[field.name] = "amount as string or null"
-            elif field.type == "number":
+            elif field.field_type.value == "number":
                 example_fields[field.name] = "number or null"
             else:
                 example_fields[field.name] = "extracted value or null"
@@ -702,7 +702,7 @@ class GeminiPostProcessor:
         field_descriptions = []
         for field in schema.fields:
             req = " (REQUIRED)" if field.required else " (optional)"
-            field_type = f"[{field.type}]"
+            field_type = f"[{field.field_type.value}]"
             field_descriptions.append(f"  - {field.name} {field_type}{req}: {field.description}")
         
         fields_text = "\n".join(field_descriptions)
@@ -710,13 +710,13 @@ class GeminiPostProcessor:
         # Build example JSON structure based on actual schema fields
         example_fields = {}
         for field in schema.fields:
-            if field.type == "list":
+            if field.field_type.value == "list":
                 example_fields[field.name] = [{"name": "...", "details": "..."}]
-            elif field.type == "date":
+            elif field.field_type.value == "date":
                 example_fields[field.name] = "YYYY-MM-DD or null"
-            elif field.type == "currency":
+            elif field.field_type.value == "currency":
                 example_fields[field.name] = "amount as string or null"
-            elif field.type == "number":
+            elif field.field_type.value == "number":
                 example_fields[field.name] = "number or null"
             else:
                 example_fields[field.name] = "extracted value or null"
