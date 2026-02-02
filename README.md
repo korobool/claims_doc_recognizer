@@ -7,7 +7,7 @@ Observations:
 * Bounding boxes and recognition can be tunned by config AND finetuning
 * Works well even for complex handwritten text for significant number of languages
 * Can be integrated into claims processing pipelines easily
-* Works absolutely locally, it is applicable for sensitive data processing so that you can comply with even very strict security standards in EN, UK and US including GDRP, ISO27001, FDA etc.
+* Works absolutely locally, it is applicable for sensitive data processing so that you can comply with even very strict security standards in EU, UK and US including GDRP, ISO27001, FDA etc.
 
 ![Pipeline](pipeline.png)
 
