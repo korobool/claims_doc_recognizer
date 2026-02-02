@@ -1622,7 +1622,9 @@ async function processWithLlmMain() {
         const textLines = state.ocrResult.text_lines || [];
         const fullText = textLines.map(line => line.text).join('\n');
         
-        const documentType = state.ocrResult.document_class?.type || 'unknown';
+        const documentType = state.ocrResult.document_class?.type_id || 
+                            state.ocrResult.document_class?.class?.toLowerCase() || 
+                            'unknown';
         
         const response = await fetch('/api/llm/process', {
             method: 'POST',
