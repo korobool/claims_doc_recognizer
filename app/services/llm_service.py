@@ -209,22 +209,37 @@ class OllamaClient:
     async def generate(
         self, 
         prompt: str, 
-        model: LLMModel = None,
+        model: LLMModel | str = None,
         system_prompt: str = None,
         temperature: float = None,
         max_tokens: int = None,
         stream_to_stdout: bool = True
     ) -> Optional[str]:
-        """Generate text using the specified model with optional streaming output."""
-        model = model or self.config.default_model
+        """Generate text using the specified model with optional streaming output.
+        
+        Args:
+            model: Can be LLMModel enum or string model ID for custom models
+        """
         temperature = temperature if temperature is not None else self.config.temperature
         max_tokens = max_tokens or self.config.max_tokens
         
-        print(f"[LLM] Generating with {model.display_name}...")
+        # Handle both LLMModel enum and string model IDs
+        if model is None:
+            model = self.config.default_model
+            model_id = model.value
+            model_name = model.display_name
+        elif isinstance(model, str):
+            model_id = model
+            model_name = model
+        else:
+            model_id = model.value
+            model_name = model.display_name
+        
+        print(f"[LLM] Generating with {model_name}...")
         print(f"[LLM] Prompt length: {len(prompt)} chars")
         
         payload = {
-            "model": model.value,
+            "model": model_id,
             "prompt": prompt,
             "stream": stream_to_stdout,  # Stream for real-time output
             "options": {
@@ -437,7 +452,7 @@ DOCUMENT CONTEXT:
         self,
         text: str,
         document_type: str,
-        model: LLMModel = None
+        model: LLMModel | str = None
     ) -> Dict[str, Any]:
         """
         Extract structured data from OCR text based on document type schema.
@@ -450,7 +465,12 @@ DOCUMENT CONTEXT:
         Returns:
             Dict with corrected text, extracted fields, and metadata
         """
-        model = model or self.client.config.default_model
+        if model is None:
+            model = self.client.config.default_model
+        
+        # Get model name for display
+        model_display_name = model.display_name if isinstance(model, LLMModel) else model
+        
         schema = get_schema(document_type)
         
         print(f"[LLM] Extracting structured data for document type: {document_type}")
@@ -474,7 +494,7 @@ DOCUMENT CONTEXT:
                 "success": False,
                 "original_text": text,
                 "error": "LLM generation failed",
-                "model": model.display_name,
+                "model": model_display_name,
                 "document_type": document_type,
                 "extracted_fields": schema.get_default_extraction()
             }
@@ -495,7 +515,7 @@ DOCUMENT CONTEXT:
                 "corrected_text": parsed.get("corrected_text", text),
                 "extracted_fields": extracted,
                 "confidence_notes": parsed.get("confidence_notes", ""),
-                "model": model.display_name,
+                "model": model_display_name,
                 "document_type": document_type,
                 "document_type_name": schema.display_name,
                 "schema_fields": [f.name for f in schema.fields],
@@ -509,7 +529,7 @@ DOCUMENT CONTEXT:
                 "corrected_text": result.strip(),
                 "extracted_fields": schema.get_default_extraction(),
                 "confidence_notes": "JSON parsing failed, returning raw corrected text",
-                "model": model.display_name,
+                "model": model_display_name,
                 "document_type": document_type,
                 "document_type_name": schema.display_name,
                 "parse_error": True
@@ -518,7 +538,7 @@ DOCUMENT CONTEXT:
     async def process_text(
         self,
         text: str,
-        model: LLMModel = None,
+        model: LLMModel | str = None,
         document_type: str = None
     ) -> Dict[str, Any]:
         """

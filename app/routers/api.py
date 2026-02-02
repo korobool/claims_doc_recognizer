@@ -205,14 +205,35 @@ async def llm_status():
     models = []
     available_models = await client.list_models() if ollama_available else []
     
+    # Track which pulled models are matched to predefined ones
+    matched_models = set()
+    
+    # First add predefined models
     for model in LLMModel:
         model_name = model.value.split(":")[0]
         is_available = any(model_name in m for m in available_models)
+        if is_available:
+            # Track which available models match this predefined model
+            for m in available_models:
+                if model_name in m:
+                    matched_models.add(m)
         models.append(LLMModelInfo(
             id=model.value,
             name=model.display_name,
             available=is_available
         ))
+    
+    # Add any pulled models that aren't predefined
+    for pulled_model in available_models:
+        if pulled_model not in matched_models:
+            # This is a model pulled by user but not in our predefined list
+            # Use the model name as both id and display name
+            display_name = pulled_model.replace(":", " ").title()
+            models.append(LLMModelInfo(
+                id=pulled_model,
+                name=f"{display_name} (custom)",
+                available=True
+            ))
     
     return LLMStatusResponse(
         ollama_available=ollama_available,
@@ -334,15 +355,33 @@ async def llm_process_text(request: LLMProcessRequest):
     if not await client.is_available():
         raise HTTPException(status_code=503, detail="Ollama service not available. Please start Ollama.")
     
-    # Get model
-    model = LLMModel.from_string(request.model) if request.model else None
-    
-    # Check if model is available
-    if model and not await client.is_model_available(model):
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Model {model.display_name} not available. Please pull it first."
-        )
+    # Get model - can be predefined LLMModel or custom string
+    model = None
+    model_id = request.model
+    if request.model:
+        # Try to match to predefined model first
+        for m in LLMModel:
+            if m.value.lower() == request.model.lower():
+                model = m
+                break
+        
+        # If not a predefined model, check if it's available as custom model
+        if model is None:
+            available_models = await client.list_models()
+            if request.model not in available_models:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Model {request.model} not available. Please pull it first."
+                )
+            # Use the model ID string directly for custom models
+            model_id = request.model
+        else:
+            # Check if predefined model is available
+            if not await client.is_model_available(model):
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Model {model.display_name} not available. Please pull it first."
+                )
     
     processor = get_llm_processor()
     
