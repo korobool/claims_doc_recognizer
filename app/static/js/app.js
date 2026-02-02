@@ -79,6 +79,7 @@ function init() {
     document.addEventListener('keydown', handleKeyboardZoom);
     
     // Fetch device info on load
+    console.log('Initializing app, fetching device info...');
     fetchDeviceInfo();
 }
 
@@ -788,14 +789,17 @@ function bboxOverlaps(bbox1, bbox2) {
 // === Device Info ===
 
 async function fetchDeviceInfo() {
+    console.log('fetchDeviceInfo called');
     try {
         const response = await fetch('/api/device-info');
+        console.log('Device info response status:', response.status);
         if (!response.ok) {
-            throw new Error('Failed to fetch device info');
+            throw new Error('Failed to fetch device info: ' + response.status);
         }
         const info = await response.json();
         console.log('Device info received:', info);
         updateDeviceInfoUI(info);
+        console.log('Device info UI updated');
     } catch (error) {
         console.error('Error fetching device info:', error);
         if (elements.deviceInfoStatus) {
