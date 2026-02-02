@@ -1,3 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch>=2.0.0
+torchvision>=0.15.0
+
 fastapi>=0.104.0
 uvicorn>=0.24.0
 python-multipart>=0.0.6
@@ -10,8 +15,3 @@ numpy>=1.24.0
 requests>=2.31.0
 scipy>=1.10.0
 transformers>=4.45.0,<4.57.0
-
-# PyTorch - NOTE: For NVIDIA GPU/CUDA support, install manually:
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# For CPU only (default):
-# torch>=2.0.0
