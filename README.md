@@ -35,24 +35,27 @@ pip install -r requirements.txt
 
 The `install_pytorch.sh` script automatically detects your platform and installs the appropriate PyTorch version:
 
-| Platform | Acceleration |
-|----------|--------------|
-| NVIDIA GPU (x86_64) | CUDA |
-| NVIDIA GPU (ARM64/DGX) | CUDA via NVIDIA PyPI |
-| Apple Silicon (M1/M2/M3) | MPS |
-| CPU only | CPU |
+| Platform | Acceleration | PyTorch Index |
+|----------|--------------|---------------|
+| Apple Silicon (M1/M2/M3) | MPS | Standard PyPI |
+| NVIDIA GPU (x86_64) | CUDA 12.1 | `cu121` |
+| DGX Spark (aarch64, CUDA 13) | CUDA 13.0 | `cu130` |
+| CPU only | None | `cpu` |
 
 **Manual PyTorch installation** (if script fails):
 
 ```bash
-# NVIDIA GPU (x86_64):
+# Apple Silicon (MPS):
+pip install torch torchvision
+
+# NVIDIA GPU (x86_64, CUDA 12.x):
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# NVIDIA GPU (ARM64/DGX/Jetson):
-pip install torch torchvision --index-url https://pypi.nvidia.com
+# DGX Spark (aarch64, CUDA 13.0):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 
-# Apple Silicon or CPU:
-pip install torch torchvision
+# CPU only:
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
 
 **Note**: On first run, Surya OCR models will be downloaded automatically (~1.5GB). CLIP model (~150MB) downloads on first classification.

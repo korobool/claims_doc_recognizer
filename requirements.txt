@@ -1,8 +1,8 @@
---index-url https://download.pytorch.org/whl/cu130
---extra-index-url https://pypi.org/simple
-
-torch
-torchvision
+# PyTorch is installed separately via install_pytorch.sh
+# This ensures correct GPU acceleration for each platform:
+# - Mac (MPS): standard PyTorch
+# - NVIDIA GPU (x86_64): cu121 wheels  
+# - DGX Spark (aarch64): cu130 wheels
 
 fastapi>=0.104.0
 uvicorn>=0.24.0

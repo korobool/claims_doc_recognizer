@@ -2,6 +2,7 @@
 
 # PyTorch Installation Script with GPU/CUDA Support
 # Automatically detects platform and installs appropriate PyTorch version
+# Supports: Mac (MPS), NVIDIA GPU (CUDA), DGX Spark (CUDA 13.0)
 
 set -e
 
@@ -17,16 +18,20 @@ echo "Architecture: $ARCH"
 OS=$(uname -s)
 echo "OS: $OS"
 
-# Check for NVIDIA GPU
+# Check for NVIDIA GPU and CUDA version
 NVIDIA_GPU=false
+CUDA_MAJOR_VERSION=""
 if command -v nvidia-smi &> /dev/null; then
     NVIDIA_GPU=true
     echo "NVIDIA GPU: Detected"
     nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null || true
     
     # Get CUDA version from nvidia-smi
-    CUDA_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
-    echo "Driver Version: $CUDA_VERSION"
+    CUDA_VERSION_FULL=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' 2>/dev/null || echo "")
+    if [[ -n "$CUDA_VERSION_FULL" ]]; then
+        CUDA_MAJOR_VERSION=$(echo "$CUDA_VERSION_FULL" | cut -d. -f1)
+        echo "CUDA Version: $CUDA_VERSION_FULL (Major: $CUDA_MAJOR_VERSION)"
+    fi
 else
     echo "NVIDIA GPU: Not detected"
 fi
@@ -47,31 +52,19 @@ echo "Installing PyTorch..."
 
 # Installation logic based on platform
 if [[ "$NVIDIA_GPU" == true ]]; then
-    if [[ "$ARCH" == "x86_64" ]]; then
-        # x86_64 with NVIDIA GPU - use CUDA wheels
+    if [[ "$ARCH" == "aarch64" ]]; then
+        # ARM64 with NVIDIA GPU (DGX Spark uses CUDA 13.0)
+        if [[ "$CUDA_MAJOR_VERSION" == "13" ]]; then
+            echo "Installing PyTorch for DGX Spark (CUDA 13.0, aarch64)..."
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+        else
+            echo "Installing PyTorch for ARM64 + NVIDIA GPU (CUDA 12.x)..."
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+        fi
+    elif [[ "$ARCH" == "x86_64" ]]; then
+        # x86_64 with NVIDIA GPU - use CUDA 12.1 wheels
         echo "Installing PyTorch with CUDA support (x86_64)..."
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-    elif [[ "$ARCH" == "aarch64" ]]; then
-        # ARM64 with NVIDIA GPU (e.g., Jetson, DGX Spark)
-        echo "Installing PyTorch for ARM64 + NVIDIA GPU..."
-        echo ""
-        echo "For ARM64 + NVIDIA GPU, try one of these options:"
-        echo ""
-        echo "Option 1: NVIDIA PyPI (recommended for DGX/Jetson):"
-        echo "  pip install torch --index-url https://pypi.nvidia.com"
-        echo ""
-        echo "Option 2: Build from source or use NGC container"
-        echo "  See: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch"
-        echo ""
-        echo "Option 3: Use conda with NVIDIA channel:"
-        echo "  conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia"
-        echo ""
-        echo "Attempting NVIDIA PyPI installation..."
-        pip install torch torchvision --index-url https://pypi.nvidia.com || {
-            echo ""
-            echo "NVIDIA PyPI failed. Trying standard PyTorch..."
-            pip install torch torchvision
-        }
     else
         echo "Unknown architecture with NVIDIA GPU. Installing standard PyTorch..."
         pip install torch torchvision
