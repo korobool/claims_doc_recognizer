@@ -1,4 +1,7 @@
-# Document Recognition System
+# Document Recognition System 
+Mini-POC
+![Pipeline](pipeline.png)
+
 
 A local web application for document OCR (Optical Character Recognition) with image deskewing, text recognition, and document classification.
 
