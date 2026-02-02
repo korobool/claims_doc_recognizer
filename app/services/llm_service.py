@@ -10,9 +10,13 @@ Provides integration with local LLMs via Ollama for:
 
 import asyncio
 import httpx
+import json
+import re
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 from enum import Enum
+
+from app.config.document_schemas import get_schema, DocumentSchema, FieldSchema
 
 
 class LLMModel(Enum):
@@ -187,45 +191,215 @@ class LLMPostProcessor:
     LLM-based post-processor for OCR results.
     
     Capabilities:
-    - Text normalization and denoising
+    - Context-aware text normalization based on document type
+    - Structured field extraction using document schemas
     - Medicine name recognition and correction
-    - Improved text grouping
     - OCR artifact removal
     """
     
-    SYSTEM_PROMPT = """You are an expert OCR post-processor. Your task is to clean and improve text that was extracted from documents using OCR (Optical Character Recognition).
+    BASE_SYSTEM_PROMPT = """You are an expert OCR post-processor and document data extractor.
 
-Common OCR errors you should fix:
+Your task is to:
+1. Clean and correct OCR-extracted text
+2. Extract structured information based on the document type
+3. Return results in a specific JSON format
+
+Common OCR errors to fix:
 - Character confusion: 0/O, 1/l/I, 5/S, 8/B, rn/m, cl/d
 - Missing or extra spaces
 - Wrong punctuation
 - Garbled text or artifacts
 - Split words that should be joined
 
-For medical documents:
-- Correct medication names to their proper spelling
-- Normalize dosage formats (e.g., "500mg" not "5OOmg")
-- Preserve important medical terminology
-
-Output ONLY the corrected text. Do not add explanations or commentary."""
-
-    MEDICAL_SYSTEM_PROMPT = """You are a medical document specialist. Your task is to:
-1. Correct OCR errors in medical text
-2. Properly identify and spell medication names
-3. Normalize dosage information
-4. Preserve medical terminology and abbreviations
-5. Group related information logically
-
-Common medications to watch for:
-- Antibiotics: Amoxicillin, Azithromycin, Ciprofloxacin, etc.
-- Pain relievers: Ibuprofen, Acetaminophen, Naproxen, etc.
-- Cardiovascular: Lisinopril, Metoprolol, Amlodipine, etc.
-- Diabetes: Metformin, Insulin, Glipizide, etc.
-
-Output the corrected and normalized text. Group related information together."""
+IMPORTANT: Always respond with valid JSON only. No explanations or commentary outside the JSON."""
 
     def __init__(self, client: OllamaClient = None):
         self.client = client or OllamaClient()
+    
+    def _build_extraction_prompt(self, text: str, schema: DocumentSchema) -> str:
+        """Build a context-aware extraction prompt based on document schema."""
+        fields_json = []
+        for field in schema.fields:
+            field_info = {
+                "name": field.name,
+                "type": field.field_type.value,
+                "description": field.description,
+                "required": field.required
+            }
+            fields_json.append(field_info)
+        
+        prompt = f"""You are processing a **{schema.display_name}** document.
+
+{schema.llm_context}
+
+---
+OCR TEXT TO PROCESS:
+---
+{text}
+---
+
+TASK:
+1. Correct any OCR errors in the text above
+2. Extract the following fields from the document:
+
+{json.dumps(fields_json, indent=2)}
+
+RESPONSE FORMAT:
+Return a JSON object with this exact structure:
+{{
+  "corrected_text": "The full corrected text with OCR errors fixed",
+  "extracted_fields": {{
+    "field_name": "extracted value or null if not found",
+    ...
+  }},
+  "confidence_notes": "Brief notes on extraction confidence or issues"
+}}
+
+For list-type fields, return an array of items.
+For fields not found in the document, use null.
+Ensure all required fields are attempted.
+
+Respond with ONLY the JSON object, no other text."""
+        
+        return prompt
+    
+    def _build_system_prompt(self, schema: DocumentSchema) -> str:
+        """Build system prompt with document context."""
+        return f"""{self.BASE_SYSTEM_PROMPT}
+
+DOCUMENT CONTEXT:
+{schema.llm_context}"""
+    
+    def _parse_json_response(self, response: str, schema: DocumentSchema) -> Dict[str, Any]:
+        """Parse LLM JSON response, handling common issues."""
+        if not response:
+            return None
+        
+        # Try to extract JSON from response
+        response = response.strip()
+        
+        # Handle markdown code blocks
+        if response.startswith("```"):
+            lines = response.split("\n")
+            # Remove first and last lines (```json and ```)
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.startswith("```") and not in_json:
+                    in_json = True
+                    continue
+                elif line.startswith("```") and in_json:
+                    break
+                elif in_json:
+                    json_lines.append(line)
+            response = "\n".join(json_lines)
+        
+        # Try to find JSON object in response
+        json_match = re.search(r'\{[\s\S]*\}', response)
+        if json_match:
+            response = json_match.group()
+        
+        # Fix common JSON escape issues from LLMs
+        # Replace invalid escape sequences like \N with \\N or just N
+        response = re.sub(r'\\([^"\\\/bfnrtu])', r'\\\\\1', response)
+        
+        try:
+            parsed = json.loads(response)
+            return parsed
+        except json.JSONDecodeError as e:
+            print(f"[LLM] JSON parse error: {e}")
+            print(f"[LLM] Response was: {response[:500]}...")
+            
+            # Try a more aggressive fix - replace all problematic escapes
+            try:
+                # Replace backslash-letter combinations that aren't valid JSON escapes
+                fixed = re.sub(r'\\(?!["\\/bfnrtu])', '', response)
+                parsed = json.loads(fixed)
+                print("[LLM] Fixed JSON by removing invalid escapes")
+                return parsed
+            except json.JSONDecodeError:
+                pass
+            
+            return None
+    
+    async def extract_structured(
+        self,
+        text: str,
+        document_type: str,
+        model: LLMModel = None
+    ) -> Dict[str, Any]:
+        """
+        Extract structured data from OCR text based on document type schema.
+        
+        Args:
+            text: Raw OCR text to process
+            document_type: Type ID of the document (e.g., "prescription", "receipt")
+            model: LLM model to use
+            
+        Returns:
+            Dict with corrected text, extracted fields, and metadata
+        """
+        model = model or self.client.config.default_model
+        schema = get_schema(document_type)
+        
+        # Build context-aware prompts
+        prompt = self._build_extraction_prompt(text, schema)
+        system_prompt = self._build_system_prompt(schema)
+        
+        # Generate structured extraction
+        result = await self.client.generate(
+            prompt=prompt,
+            model=model,
+            system_prompt=system_prompt,
+            temperature=0.1,  # Low temperature for consistent structured output
+            max_tokens=4096
+        )
+        
+        if not result:
+            return {
+                "success": False,
+                "original_text": text,
+                "error": "LLM generation failed",
+                "model": model.display_name,
+                "document_type": document_type,
+                "extracted_fields": schema.get_default_extraction()
+            }
+        
+        # Parse the JSON response
+        parsed = self._parse_json_response(result, schema)
+        
+        if parsed:
+            # Ensure all schema fields are present
+            extracted = parsed.get("extracted_fields", {})
+            for field in schema.fields:
+                if field.name not in extracted:
+                    extracted[field.name] = field.default
+            
+            return {
+                "success": True,
+                "original_text": text,
+                "corrected_text": parsed.get("corrected_text", text),
+                "extracted_fields": extracted,
+                "confidence_notes": parsed.get("confidence_notes", ""),
+                "model": model.display_name,
+                "document_type": document_type,
+                "document_type_name": schema.display_name,
+                "schema_fields": [f.name for f in schema.fields],
+                "required_fields": schema.get_required_fields()
+            }
+        else:
+            # Fallback: return raw result as corrected text
+            return {
+                "success": True,
+                "original_text": text,
+                "corrected_text": result.strip(),
+                "extracted_fields": schema.get_default_extraction(),
+                "confidence_notes": "JSON parsing failed, returning raw corrected text",
+                "model": model.display_name,
+                "document_type": document_type,
+                "document_type_name": schema.display_name,
+                "parse_error": True
+            }
     
     async def process_text(
         self,
@@ -234,129 +408,12 @@ Output the corrected and normalized text. Group related information together."""
         document_type: str = None
     ) -> Dict[str, Any]:
         """
-        Process OCR text using LLM for improvement.
+        Process OCR text using LLM with context-aware extraction.
         
-        Args:
-            text: Raw OCR text to process
-            model: LLM model to use
-            document_type: Type of document (e.g., "prescription", "receipt")
-            
-        Returns:
-            Dict with processed text and metadata
+        This is the main entry point that uses document schemas for structured extraction.
         """
-        model = model or self.client.config.default_model
-        
-        # Select appropriate system prompt
-        if document_type in ["prescription", "medical", "medication"]:
-            system_prompt = self.MEDICAL_SYSTEM_PROMPT
-        else:
-            system_prompt = self.SYSTEM_PROMPT
-        
-        # Build the prompt
-        prompt = f"""Please clean and improve the following OCR-extracted text:
-
----
-{text}
----
-
-Provide the corrected text:"""
-
-        # Generate improved text
-        result = await self.client.generate(
-            prompt=prompt,
-            model=model,
-            system_prompt=system_prompt,
-            temperature=0.2  # Low temperature for consistent output
-        )
-        
-        if result:
-            return {
-                "success": True,
-                "original_text": text,
-                "processed_text": result.strip(),
-                "model": model.display_name,
-                "document_type": document_type
-            }
-        else:
-            return {
-                "success": False,
-                "original_text": text,
-                "processed_text": None,
-                "error": "LLM generation failed",
-                "model": model.display_name
-            }
-    
-    async def normalize_medical_text(
-        self,
-        text: str,
-        model: LLMModel = None
-    ) -> Dict[str, Any]:
-        """
-        Specialized processing for medical documents.
-        
-        Focuses on:
-        - Medication name correction
-        - Dosage normalization
-        - Medical terminology preservation
-        """
-        model = model or LLMModel.LLAMA_MEDITRON  # Prefer medical model
-        
-        prompt = f"""Analyze and correct this medical document text:
-
----
-{text}
----
-
-Please:
-1. Correct any OCR errors in medication names
-2. Normalize dosage formats (e.g., "500 mg" format)
-3. Identify and list any medications found
-4. Provide the cleaned text
-
-Format your response as:
-MEDICATIONS FOUND:
-- [list medications with dosages]
-
-CORRECTED TEXT:
-[the cleaned text]"""
-
-        result = await self.client.generate(
-            prompt=prompt,
-            model=model,
-            system_prompt=self.MEDICAL_SYSTEM_PROMPT,
-            temperature=0.1
-        )
-        
-        if result:
-            # Parse the structured response
-            medications = []
-            corrected_text = result
-            
-            if "MEDICATIONS FOUND:" in result:
-                parts = result.split("CORRECTED TEXT:")
-                if len(parts) == 2:
-                    med_section = parts[0].replace("MEDICATIONS FOUND:", "").strip()
-                    corrected_text = parts[1].strip()
-                    
-                    # Extract medication list
-                    for line in med_section.split("\n"):
-                        line = line.strip()
-                        if line.startswith("-"):
-                            medications.append(line[1:].strip())
-            
-            return {
-                "success": True,
-                "original_text": text,
-                "processed_text": corrected_text,
-                "medications": medications,
-                "model": model.display_name
-            }
-        else:
-            return {
-                "success": False,
-                "original_text": text,
-                "error": "Medical text processing failed"
-            }
+        # Use structured extraction for all document types
+        return await self.extract_structured(text, document_type or "unknown", model)
     
     async def denoise_text(
         self,
@@ -364,12 +421,7 @@ CORRECTED TEXT:
         model: LLMModel = None
     ) -> str:
         """
-        Remove OCR artifacts and noise from text.
-        
-        Focuses on:
-        - Removing garbage characters
-        - Fixing broken words
-        - Correcting punctuation
+        Quick denoising of OCR text without structured extraction.
         """
         model = model or self.client.config.default_model
         

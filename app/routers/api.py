@@ -228,13 +228,15 @@ async def llm_pull_model(model_id: str):
 @router.post("/llm/process")
 async def llm_process_text(request: LLMProcessRequest):
     """
-    Process OCR text using LLM for improvement.
+    Process OCR text using LLM for context-aware structured extraction.
     
     Performs:
-    - Text normalization and denoising
+    - Context-aware text correction based on document type
+    - Structured field extraction using document schemas
     - Medicine name recognition (for medical documents)
     - OCR artifact removal
-    - Improved text grouping
+    
+    Returns structured data with extracted fields matching the document schema.
     """
     client = get_ollama_client()
     
@@ -253,11 +255,8 @@ async def llm_process_text(request: LLMProcessRequest):
     
     processor = get_llm_processor()
     
-    # Process based on document type
-    if request.document_type in ["prescription", "medical", "medication"]:
-        result = await processor.normalize_medical_text(request.text, model)
-    else:
-        result = await processor.process_text(request.text, model, request.document_type)
+    # Use context-aware structured extraction for all document types
+    result = await processor.process_text(request.text, model, request.document_type)
     
     return result
 

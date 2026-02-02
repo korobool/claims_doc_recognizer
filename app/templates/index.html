@@ -164,16 +164,21 @@
                         <p>Run OCR first, then click "Process with LLM" to enhance results</p>
                     </div>
                     <div class="llm-result" id="llmResult" style="display: none;">
+                        <div class="llm-section" id="llmExtractedFieldsSection">
+                            <h4>📋 Extracted Fields <span class="doc-type-badge" id="llmDocTypeBadge"></span></h4>
+                            <div class="extracted-fields" id="llmExtractedFields"></div>
+                        </div>
                         <div class="llm-section">
-                            <h4>Enhanced Text</h4>
+                            <h4>📝 Corrected Text</h4>
                             <div class="llm-text" id="llmEnhancedText"></div>
                         </div>
-                        <div class="llm-section" id="llmMedicationsSection" style="display: none;">
-                            <h4>Medications Found</h4>
-                            <ul class="llm-medications" id="llmMedications"></ul>
+                        <div class="llm-section" id="llmConfidenceSection" style="display: none;">
+                            <h4>ℹ️ Notes</h4>
+                            <div class="llm-notes" id="llmConfidenceNotes"></div>
                         </div>
                         <div class="llm-meta">
                             <span>Model: <strong id="llmModelUsed">-</strong></span>
+                            <span class="llm-doc-type">Document: <strong id="llmDocType">-</strong></span>
                         </div>
                     </div>
                     <div class="llm-loading" id="llmLoading" style="display: none;">
@@ -189,6 +194,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=11"></script>
+    <script src="/static/js/app.js?v=12"></script>
 </body>
 </html>

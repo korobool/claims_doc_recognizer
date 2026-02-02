@@ -1178,25 +1178,81 @@ function displayLlmResult(result) {
     if (elements.llmResult) elements.llmResult.style.display = 'block';
     if (elements.llmPlaceholder) elements.llmPlaceholder.style.display = 'none';
     
-    // Display enhanced text
-    if (elements.llmEnhancedText) {
-        elements.llmEnhancedText.textContent = result.processed_text || '';
+    // Display document type badge
+    const docTypeBadge = document.getElementById('llmDocTypeBadge');
+    if (docTypeBadge) {
+        docTypeBadge.textContent = result.document_type_name || result.document_type || '';
     }
     
-    // Display medications if present
-    if (result.medications && result.medications.length > 0) {
-        if (elements.llmMedicationsSection) elements.llmMedicationsSection.style.display = 'block';
-        if (elements.llmMedications) {
-            elements.llmMedications.innerHTML = result.medications
-                .map(med => `<li>${med}</li>`)
-                .join('');
+    // Display extracted fields
+    const fieldsContainer = document.getElementById('llmExtractedFields');
+    if (fieldsContainer && result.extracted_fields) {
+        const requiredFields = result.required_fields || [];
+        fieldsContainer.innerHTML = '';
+        
+        for (const [fieldName, fieldValue] of Object.entries(result.extracted_fields)) {
+            const fieldItem = document.createElement('div');
+            fieldItem.className = 'field-item';
+            
+            const isRequired = requiredFields.includes(fieldName);
+            const displayName = fieldName.replace(/_/g, ' ');
+            
+            const nameEl = document.createElement('div');
+            nameEl.className = 'field-name' + (isRequired ? ' required' : '');
+            nameEl.textContent = displayName;
+            fieldItem.appendChild(nameEl);
+            
+            const valueEl = document.createElement('div');
+            valueEl.className = 'field-value';
+            
+            if (fieldValue === null || fieldValue === undefined) {
+                valueEl.className += ' empty';
+                valueEl.textContent = 'Not found';
+            } else if (Array.isArray(fieldValue)) {
+                valueEl.className += ' list-value';
+                if (fieldValue.length === 0) {
+                    valueEl.className += ' empty';
+                    valueEl.textContent = 'None';
+                } else {
+                    fieldValue.forEach(item => {
+                        const itemEl = document.createElement('div');
+                        itemEl.className = 'list-item';
+                        itemEl.textContent = typeof item === 'object' ? JSON.stringify(item) : item;
+                        valueEl.appendChild(itemEl);
+                    });
+                }
+            } else {
+                valueEl.textContent = fieldValue;
+            }
+            
+            fieldItem.appendChild(valueEl);
+            fieldsContainer.appendChild(fieldItem);
         }
+    }
+    
+    // Display corrected text
+    if (elements.llmEnhancedText) {
+        elements.llmEnhancedText.textContent = result.corrected_text || result.processed_text || '';
+    }
+    
+    // Display confidence notes if present
+    const confidenceSection = document.getElementById('llmConfidenceSection');
+    const confidenceNotes = document.getElementById('llmConfidenceNotes');
+    if (result.confidence_notes && result.confidence_notes.trim()) {
+        if (confidenceSection) confidenceSection.style.display = 'block';
+        if (confidenceNotes) confidenceNotes.textContent = result.confidence_notes;
     } else {
-        if (elements.llmMedicationsSection) elements.llmMedicationsSection.style.display = 'none';
+        if (confidenceSection) confidenceSection.style.display = 'none';
     }
     
     // Display model used
     if (elements.llmModelUsed) {
         elements.llmModelUsed.textContent = result.model || 'Unknown';
+    }
+    
+    // Display document type
+    const docTypeEl = document.getElementById('llmDocType');
+    if (docTypeEl) {
+        docTypeEl.textContent = result.document_type_name || result.document_type || 'Unknown';
     }
 }
