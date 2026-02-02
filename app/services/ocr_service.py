@@ -1,10 +1,13 @@
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from surya.recognition import RecognitionPredictor
 from surya.detection import DetectionPredictor
 from surya.foundation import FoundationPredictor
 import io
 import torch
 from transformers import CLIPProcessor, CLIPModel
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Tuple, Optional
+import numpy as np
 
 _foundation_predictor = None
 _recognition_predictor = None
@@ -180,12 +183,232 @@ def get_predictors():
     return _recognition_predictor, _detection_predictor
 
 
-def recognize_text(image_bytes: bytes) -> dict:
+def compute_iou(box1: List[float], box2: List[float]) -> float:
     """
-    Recognize text in an image using Surya OCR.
+    Compute Intersection over Union (IoU) between two bounding boxes.
+    
+    Args:
+        box1, box2: Bounding boxes as [x1, y1, x2, y2]
+        
+    Returns:
+        IoU value between 0 and 1
+    """
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    
+    intersection = (x2 - x1) * (y2 - y1)
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = area1 + area2 - intersection
+    
+    return intersection / union if union > 0 else 0.0
+
+
+def deduplicate_text_lines(text_lines: List[dict], iou_threshold: float = 0.5) -> List[dict]:
+    """
+    Remove duplicate text lines based on IoU overlap.
+    Keeps the line with higher confidence when duplicates are found.
+    
+    Args:
+        text_lines: List of text line dicts with 'bbox' and 'confidence'
+        iou_threshold: IoU threshold above which lines are considered duplicates
+        
+    Returns:
+        Deduplicated list of text lines
+    """
+    if not text_lines:
+        return []
+    
+    # Sort by confidence (highest first)
+    sorted_lines = sorted(text_lines, key=lambda l: l.get('confidence', 0), reverse=True)
+    
+    keep = []
+    for line in sorted_lines:
+        is_duplicate = False
+        for kept in keep:
+            if compute_iou(line['bbox'], kept['bbox']) > iou_threshold:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            keep.append(line)
+    
+    # Sort by vertical position for natural reading order
+    keep.sort(key=lambda l: (l['bbox'][1], l['bbox'][0]))
+    
+    return keep
+
+
+def create_enhanced_image(image: Image.Image) -> Image.Image:
+    """
+    Create an enhanced version of the image for better text detection.
+    Uses contrast and sharpness enhancement.
+    
+    Args:
+        image: Original PIL Image
+        
+    Returns:
+        Enhanced PIL Image
+    """
+    # Enhance contrast
+    enhancer = ImageEnhance.Contrast(image)
+    enhanced = enhancer.enhance(1.3)
+    
+    # Enhance sharpness
+    enhancer = ImageEnhance.Sharpness(enhanced)
+    enhanced = enhancer.enhance(1.2)
+    
+    return enhanced
+
+
+def create_high_contrast_image(image: Image.Image) -> Image.Image:
+    """
+    Create a high-contrast version for detecting faint text.
+    
+    Args:
+        image: Original PIL Image
+        
+    Returns:
+        High-contrast PIL Image
+    """
+    # Higher contrast for faint text
+    enhancer = ImageEnhance.Contrast(image)
+    enhanced = enhancer.enhance(1.8)
+    
+    # Slight brightness adjustment
+    enhancer = ImageEnhance.Brightness(enhanced)
+    enhanced = enhancer.enhance(1.1)
+    
+    return enhanced
+
+
+def run_detection_pass(image: Image.Image, recognition_predictor, detection_predictor, 
+                       pass_name: str = "standard") -> Tuple[List[dict], str]:
+    """
+    Run a single detection pass on an image.
+    
+    Args:
+        image: PIL Image to process
+        recognition_predictor: Surya recognition predictor
+        detection_predictor: Surya detection predictor
+        pass_name: Name of this pass for logging
+        
+    Returns:
+        Tuple of (text_lines list, pass_name)
+    """
+    try:
+        predictions = recognition_predictor([image], det_predictor=detection_predictor)
+        
+        if not predictions or len(predictions) == 0:
+            return [], pass_name
+        
+        result = predictions[0]
+        text_lines = []
+        
+        for line in result.text_lines:
+            line_data = {
+                "text": line.text,
+                "confidence": line.confidence,
+                "bbox": list(line.bbox),  # Ensure it's a list
+                "polygon": line.polygon if hasattr(line, 'polygon') else None,
+                "detection_pass": pass_name
+            }
+            
+            if hasattr(line, 'words') and line.words:
+                line_data["words"] = [
+                    {
+                        "text": word.text,
+                        "bbox": list(word.bbox),
+                        "confidence": word.confidence
+                    }
+                    for word in line.words
+                ]
+            
+            text_lines.append(line_data)
+        
+        return text_lines, pass_name
+        
+    except Exception as e:
+        print(f"[OCR] Detection pass '{pass_name}' failed: {e}")
+        return [], pass_name
+
+
+def multi_pass_recognition(image: Image.Image, recognition_predictor, detection_predictor) -> List[dict]:
+    """
+    Perform multi-pass text detection on original and enhanced images.
+    
+    Runs detection on:
+    1. Original image (standard pass)
+    2. Contrast-enhanced image (catches faint text)
+    3. High-contrast image (catches very faint/handwritten text)
+    
+    Results are merged and deduplicated using IoU.
+    
+    Args:
+        image: Original PIL Image
+        recognition_predictor: Surya recognition predictor
+        detection_predictor: Surya detection predictor
+        
+    Returns:
+        Merged and deduplicated list of text lines
+    """
+    # Prepare image variants
+    enhanced_image = create_enhanced_image(image)
+    high_contrast_image = create_high_contrast_image(image)
+    
+    all_text_lines = []
+    pass_stats = {}
+    
+    # Run passes sequentially (Surya uses GPU, parallel would cause contention)
+    # Pass 1: Original image
+    print("[OCR] Running detection pass 1/3: original image")
+    lines1, name1 = run_detection_pass(image, recognition_predictor, detection_predictor, "original")
+    all_text_lines.extend(lines1)
+    pass_stats[name1] = len(lines1)
+    
+    # Pass 2: Enhanced image
+    print("[OCR] Running detection pass 2/3: enhanced image")
+    lines2, name2 = run_detection_pass(enhanced_image, recognition_predictor, detection_predictor, "enhanced")
+    all_text_lines.extend(lines2)
+    pass_stats[name2] = len(lines2)
+    
+    # Pass 3: High contrast image
+    print("[OCR] Running detection pass 3/3: high-contrast image")
+    lines3, name3 = run_detection_pass(high_contrast_image, recognition_predictor, detection_predictor, "high_contrast")
+    all_text_lines.extend(lines3)
+    pass_stats[name3] = len(lines3)
+    
+    # Log pass statistics
+    total_before = len(all_text_lines)
+    print(f"[OCR] Detection passes complete: {pass_stats}")
+    print(f"[OCR] Total detections before deduplication: {total_before}")
+    
+    # Deduplicate based on IoU
+    deduplicated = deduplicate_text_lines(all_text_lines, iou_threshold=0.5)
+    
+    print(f"[OCR] After deduplication: {len(deduplicated)} text lines")
+    
+    return deduplicated
+
+
+def recognize_text(image_bytes: bytes, multi_pass: bool = True) -> dict:
+    """
+    Recognize text in an image using Surya OCR with multi-pass detection.
+    
+    Multi-pass detection runs OCR on:
+    - Original image
+    - Contrast-enhanced image  
+    - High-contrast image
+    
+    Results are merged and deduplicated for higher accuracy.
     
     Args:
         image_bytes: Image as bytes
+        multi_pass: If True, use multi-pass detection (default). If False, single pass.
         
     Returns:
         dict: OCR results in JSON format
@@ -197,36 +420,37 @@ def recognize_text(image_bytes: bytes) -> dict:
     
     recognition_predictor, detection_predictor = get_predictors()
     
-    predictions = recognition_predictor([image], det_predictor=detection_predictor)
-    
-    if not predictions or len(predictions) == 0:
-        return {
-            "text_lines": [],
-            "image_bbox": [0, 0, image.width, image.height]
-        }
-    
-    result = predictions[0]
-    
-    text_lines = []
-    for line in result.text_lines:
-        line_data = {
-            "text": line.text,
-            "confidence": line.confidence,
-            "bbox": line.bbox,
-            "polygon": line.polygon if hasattr(line, 'polygon') else None,
-        }
+    if multi_pass:
+        # Multi-pass detection for higher accuracy
+        text_lines = multi_pass_recognition(image, recognition_predictor, detection_predictor)
+    else:
+        # Single pass (legacy behavior)
+        predictions = recognition_predictor([image], det_predictor=detection_predictor)
         
-        if hasattr(line, 'words') and line.words:
-            line_data["words"] = [
-                {
-                    "text": word.text,
-                    "bbox": word.bbox,
-                    "confidence": word.confidence
+        if not predictions or len(predictions) == 0:
+            text_lines = []
+        else:
+            result = predictions[0]
+            text_lines = []
+            for line in result.text_lines:
+                line_data = {
+                    "text": line.text,
+                    "confidence": line.confidence,
+                    "bbox": list(line.bbox),
+                    "polygon": line.polygon if hasattr(line, 'polygon') else None,
                 }
-                for word in line.words
-            ]
-        
-        text_lines.append(line_data)
+                
+                if hasattr(line, 'words') and line.words:
+                    line_data["words"] = [
+                        {
+                            "text": word.text,
+                            "bbox": list(word.bbox),
+                            "confidence": word.confidence
+                        }
+                        for word in line.words
+                    ]
+                
+                text_lines.append(line_data)
     
     # Classify document using hybrid method (CLIP + text)
     classification = classify_document_hybrid(image, text_lines)
@@ -234,7 +458,8 @@ def recognize_text(image_bytes: bytes) -> dict:
     return {
         "text_lines": text_lines,
         "image_bbox": [0, 0, image.width, image.height],
-        "document_class": classification
+        "document_class": classification,
+        "detection_mode": "multi_pass" if multi_pass else "single_pass"
     }
 
 

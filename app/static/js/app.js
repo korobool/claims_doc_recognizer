@@ -9,7 +9,8 @@ const state = {
     isDrawingMode: false,
     isDrawing: false,
     drawStart: null,
-    deviceInfoExpanded: false
+    deviceInfoExpanded: false,
+    canRevertEnhance: false  // Track if enhance can be reverted
 };
 
 // DOM elements
@@ -17,7 +18,8 @@ const elements = {
     fileInput: document.getElementById('fileInput'),
     uploadArea: document.getElementById('uploadArea'),
     imageList: document.getElementById('imageList'),
-    normalizeBtn: document.getElementById('normalizeBtn'),
+    deskewBtn: document.getElementById('deskewBtn'),
+    enhanceBtn: document.getElementById('enhanceBtn'),
     recognizeBtn: document.getElementById('recognizeBtn'),
     addBboxBtn: document.getElementById('addBboxBtn'),
     saveBtn: document.getElementById('saveBtn'),
@@ -69,7 +71,8 @@ function init() {
     elements.uploadArea.addEventListener('drop', handleDrop);
     
     // Buttons
-    elements.normalizeBtn.addEventListener('click', normalizeImage);
+    elements.deskewBtn.addEventListener('click', deskewImage);
+    elements.enhanceBtn.addEventListener('click', enhanceImage);
     elements.recognizeBtn.addEventListener('click', recognizeImage);
     elements.addBboxBtn.addEventListener('click', toggleDrawingMode);
     elements.saveBtn.addEventListener('click', saveJson);
@@ -191,29 +194,35 @@ function selectImage(imageId) {
     elements.textOverlay.innerHTML = '';
     elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
     
+    // Reset enhance/revert state when switching images
+    state.canRevertEnhance = false;
+    elements.enhanceBtn.innerHTML = '✨ Enhance';
+    elements.enhanceBtn.title = '';
+    
     // Enable buttons
-    elements.normalizeBtn.disabled = false;
+    elements.deskewBtn.disabled = false;
+    elements.enhanceBtn.disabled = false;
     elements.recognizeBtn.disabled = false;
     elements.saveBtn.disabled = true;
 }
 
 // === Image processing ===
 
-async function normalizeImage() {
+async function deskewImage() {
     if (!state.selectedImageId) return;
     
-    elements.normalizeBtn.classList.add('loading');
-    elements.normalizeBtn.disabled = true;
+    elements.deskewBtn.classList.add('loading');
+    elements.deskewBtn.disabled = true;
     
     try {
-        const response = await fetch('/api/normalize', {
+        const response = await fetch('/api/deskew', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image_id: state.selectedImageId })
         });
         
         if (!response.ok) {
-            throw new Error('Normalize failed');
+            throw new Error('Deskew failed');
         }
         
         const data = await response.json();
@@ -227,19 +236,129 @@ async function normalizeImage() {
             listItem.src = `/api/image/${state.selectedImageId}?t=${Date.now()}`;
         }
         
-        // Clear overlay on normalization
+        // Clear overlay on deskew
         elements.textOverlay.innerHTML = '';
         state.ocrResult = null;
         elements.saveBtn.disabled = true;
         
-        console.log(`Normalized by ${data.angle.toFixed(2)}°`);
+        console.log(`Deskew complete: rotated by ${data.angle.toFixed(2)}°`);
         
     } catch (error) {
-        console.error('Normalize error:', error);
-        alert('Normalization error');
+        console.error('Deskew error:', error);
+        alert('Deskew error');
     } finally {
-        elements.normalizeBtn.classList.remove('loading');
-        elements.normalizeBtn.disabled = false;
+        elements.deskewBtn.classList.remove('loading');
+        elements.deskewBtn.disabled = false;
+    }
+}
+
+async function enhanceImage() {
+    if (!state.selectedImageId) return;
+    
+    // Check if we should revert instead
+    if (state.canRevertEnhance) {
+        return revertEnhance();
+    }
+    
+    elements.enhanceBtn.classList.add('loading');
+    elements.enhanceBtn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/enhance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_id: state.selectedImageId })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Enhance failed');
+        }
+        
+        const data = await response.json();
+        
+        // Update image
+        elements.mainImage.src = `/api/image/${state.selectedImageId}?t=${Date.now()}`;
+        
+        // Update preview in list
+        const listItem = document.querySelector(`.image-item[data-id="${state.selectedImageId}"] img`);
+        if (listItem) {
+            listItem.src = `/api/image/${state.selectedImageId}?t=${Date.now()}`;
+        }
+        
+        // Clear overlay on enhance
+        elements.textOverlay.innerHTML = '';
+        state.ocrResult = null;
+        elements.saveBtn.disabled = true;
+        
+        // Update button to show Revert option
+        if (data.can_revert) {
+            state.canRevertEnhance = true;
+            elements.enhanceBtn.innerHTML = '↩️ Revert';
+            elements.enhanceBtn.title = 'Revert to pre-enhancement image';
+        }
+        
+        // Log enhancement results
+        const ops = data.operations || [];
+        const metrics = data.quality_metrics || {};
+        console.log(`Image enhancement complete:`);
+        console.log(`  - Operations: ${ops.length > 0 ? ops.join(', ') : 'none'}`);
+        if (metrics.contrast) {
+            console.log(`  - Quality metrics: contrast=${metrics.contrast}, sharpness=${metrics.sharpness}, brightness=${metrics.brightness}`);
+        }
+        
+    } catch (error) {
+        console.error('Enhance error:', error);
+        alert('Enhancement error');
+    } finally {
+        elements.enhanceBtn.classList.remove('loading');
+        elements.enhanceBtn.disabled = false;
+    }
+}
+
+async function revertEnhance() {
+    if (!state.selectedImageId) return;
+    
+    elements.enhanceBtn.classList.add('loading');
+    elements.enhanceBtn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/revert-enhance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_id: state.selectedImageId })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Revert failed');
+        }
+        
+        // Update image
+        elements.mainImage.src = `/api/image/${state.selectedImageId}?t=${Date.now()}`;
+        
+        // Update preview in list
+        const listItem = document.querySelector(`.image-item[data-id="${state.selectedImageId}"] img`);
+        if (listItem) {
+            listItem.src = `/api/image/${state.selectedImageId}?t=${Date.now()}`;
+        }
+        
+        // Clear overlay
+        elements.textOverlay.innerHTML = '';
+        state.ocrResult = null;
+        elements.saveBtn.disabled = true;
+        
+        // Reset button to Enhance
+        state.canRevertEnhance = false;
+        elements.enhanceBtn.innerHTML = '✨ Enhance';
+        elements.enhanceBtn.title = '';
+        
+        console.log('Enhancement reverted');
+        
+    } catch (error) {
+        console.error('Revert error:', error);
+        alert('Revert error');
+    } finally {
+        elements.enhanceBtn.classList.remove('loading');
+        elements.enhanceBtn.disabled = false;
     }
 }
 
