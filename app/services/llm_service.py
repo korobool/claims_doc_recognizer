@@ -17,6 +17,7 @@ from enum import Enum
 
 class LLMModel(Enum):
     """Available LLM models for post-processing."""
+    DEVSTRAL = "devstral:24b"
     QWEN_2_5 = "qwen2.5:7b"
     LLAMA_MEDITRON = "meditron:7b"
     MEDGEMMA = "medgemma:latest"
@@ -26,6 +27,8 @@ class LLMModel(Enum):
     def from_string(cls, model_name: str) -> "LLMModel":
         """Get model enum from string name."""
         mapping = {
+            "devstral": cls.DEVSTRAL,
+            "devstral:24b": cls.DEVSTRAL,
             "qwen2.5": cls.QWEN_2_5,
             "qwen": cls.QWEN_2_5,
             "meditron": cls.LLAMA_MEDITRON,
@@ -34,12 +37,13 @@ class LLMModel(Enum):
             "gpt-oss": cls.GPT_OSS,
             "gpt-oss-20b": cls.GPT_OSS,
         }
-        return mapping.get(model_name.lower(), cls.QWEN_2_5)
+        return mapping.get(model_name.lower(), cls.DEVSTRAL)
     
     @property
     def display_name(self) -> str:
         """Human-readable model name."""
         names = {
+            LLMModel.DEVSTRAL: "Devstral (24B)",
             LLMModel.QWEN_2_5: "Qwen 2.5 (7B)",
             LLMModel.LLAMA_MEDITRON: "Llama-3-Meditron (7B)",
             LLMModel.MEDGEMMA: "MedGemma",
@@ -52,7 +56,7 @@ class LLMModel(Enum):
 class LLMConfig:
     """Configuration for LLM service."""
     ollama_base_url: str = "http://localhost:11434"
-    default_model: LLMModel = LLMModel.QWEN_2_5
+    default_model: LLMModel = LLMModel.DEVSTRAL
     timeout: float = 120.0  # LLM inference can be slow
     max_tokens: int = 2048
     temperature: float = 0.3  # Lower for more deterministic output
