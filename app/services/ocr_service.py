@@ -6,8 +6,16 @@ import io
 import torch
 from transformers import CLIPProcessor, CLIPModel
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import numpy as np
+
+from app.config.document_types import (
+    DOCUMENT_TYPES,
+    get_document_type,
+    get_clip_prompts,
+    get_type_ids,
+)
+from app.services.context_processor import process_with_context
 
 _foundation_predictor = None
 _recognition_predictor = None
@@ -134,16 +142,16 @@ def print_device_info():
     print(f"All models will use '{device}' for inference.")
     print("="*60 + "\n")
 
-# Class descriptions for CLIP zero-shot classification
-CLIP_CLASS_DESCRIPTIONS = [
-    "a photo of a receipt or invoice with prices and totals",
-    "a photo of a medical prescription or medication document",
-    "a photo of a form or application document with fields to fill",
-    "a photo of a contract or legal agreement document",
-    "a photo of an unknown or unclassified document"
-]
+# Get CLIP prompts and class names from config
+def get_clip_class_config():
+    """Get CLIP classification config from document types."""
+    type_ids = get_type_ids()
+    prompts = [DOCUMENT_TYPES[tid].clip_prompt for tid in type_ids]
+    names = [DOCUMENT_TYPES[tid].display_name for tid in type_ids]
+    return type_ids, prompts, names
 
-CLIP_CLASS_NAMES = ["Receipt", "Medication Prescription", "Form", "Contract", "Undetected"]
+
+CLIP_TYPE_IDS, CLIP_CLASS_DESCRIPTIONS, CLIP_CLASS_NAMES = get_clip_class_config()
 
 
 def get_clip_model():
@@ -337,6 +345,101 @@ def run_detection_pass(image: Image.Image, recognition_predictor, detection_pred
         return [], pass_name
 
 
+def retry_low_confidence_regions(image: Image.Image, text_lines: List[dict], 
+                                  recognition_predictor, detection_predictor,
+                                  min_confidence: float = 0.7) -> List[dict]:
+    """
+    Retry recognition for low-confidence regions with enhanced preprocessing.
+    
+    For lines with confidence below threshold:
+    1. Crop the region with padding
+    2. Apply enhancement (contrast, sharpening)
+    3. Scale up 2x
+    4. Re-run OCR
+    5. Keep better result
+    
+    Args:
+        image: Original PIL Image
+        text_lines: List of text line dicts with confidence scores
+        recognition_predictor: Surya recognition predictor
+        detection_predictor: Surya detection predictor
+        min_confidence: Confidence threshold for retry
+        
+    Returns:
+        Updated text lines with improved low-confidence regions
+    """
+    from PIL import ImageFilter
+    
+    improved_lines = []
+    retry_count = 0
+    improvement_count = 0
+    
+    for line in text_lines:
+        confidence = line.get("confidence", 0)
+        
+        # Skip if confidence is good enough
+        if confidence >= min_confidence:
+            improved_lines.append(line)
+            continue
+        
+        bbox = line.get("bbox", [0, 0, 0, 0])
+        if not bbox or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            improved_lines.append(line)
+            continue
+        
+        retry_count += 1
+        
+        # Add padding around the region
+        padding = 10
+        x1 = max(0, int(bbox[0]) - padding)
+        y1 = max(0, int(bbox[1]) - padding)
+        x2 = min(image.width, int(bbox[2]) + padding)
+        y2 = min(image.height, int(bbox[3]) + padding)
+        
+        # Crop region
+        region = image.crop((x1, y1, x2, y2))
+        
+        # Enhance the region
+        # 1. Increase contrast
+        enhancer = ImageEnhance.Contrast(region)
+        region = enhancer.enhance(1.5)
+        
+        # 2. Sharpen
+        region = region.filter(ImageFilter.SHARPEN)
+        
+        # 3. Scale up 2x for better recognition
+        region = region.resize((region.width * 2, region.height * 2), Image.LANCZOS)
+        
+        try:
+            # Re-run OCR on enhanced region
+            predictions = recognition_predictor([region], det_predictor=detection_predictor)
+            
+            if predictions and len(predictions) > 0 and predictions[0].text_lines:
+                # Get the best result from retry
+                retry_result = predictions[0].text_lines[0]
+                
+                if retry_result.confidence > confidence:
+                    # Improvement found - use retry result but keep original bbox
+                    improvement_count += 1
+                    improved_line = line.copy()
+                    improved_line["text"] = retry_result.text
+                    improved_line["confidence"] = retry_result.confidence
+                    improved_line["retry_improved"] = True
+                    improved_line["original_confidence"] = confidence
+                    improved_lines.append(improved_line)
+                    continue
+        except Exception as e:
+            pass  # Fall through to keep original
+        
+        # Keep original if retry didn't help
+        improved_lines.append(line)
+    
+    if retry_count > 0:
+        print(f"[OCR] Low-confidence retry: {retry_count} regions, {improvement_count} improved")
+    
+    return improved_lines
+
+
 def multi_pass_recognition(image: Image.Image, recognition_predictor, detection_predictor) -> List[dict]:
     """
     Perform multi-pass text detection on original and enhanced images.
@@ -347,6 +450,7 @@ def multi_pass_recognition(image: Image.Image, recognition_predictor, detection_
     3. High-contrast image (catches very faint/handwritten text)
     
     Results are merged and deduplicated using IoU.
+    Then low-confidence regions are retried with enhanced preprocessing.
     
     Args:
         image: Original PIL Image
@@ -392,7 +496,13 @@ def multi_pass_recognition(image: Image.Image, recognition_predictor, detection_
     
     print(f"[OCR] After deduplication: {len(deduplicated)} text lines")
     
-    return deduplicated
+    # Retry low-confidence regions with enhanced preprocessing
+    improved = retry_low_confidence_regions(
+        image, deduplicated, recognition_predictor, detection_predictor,
+        min_confidence=0.7
+    )
+    
+    return improved
 
 
 def recognize_text(image_bytes: bytes, multi_pass: bool = True) -> dict:
@@ -455,11 +565,23 @@ def recognize_text(image_bytes: bytes, multi_pass: bool = True) -> dict:
     # Classify document using hybrid method (CLIP + text)
     classification = classify_document_hybrid(image, text_lines)
     
+    # Apply context-aware post-processing based on document type
+    doc_type_id = classification.get("type_id", "unknown")
+    corrected_lines, extracted_fields = process_with_context(text_lines, doc_type_id)
+    
+    # Log context processing
+    if doc_type_id != "unknown":
+        corrections_made = sum(1 for line in corrected_lines if line.get("text") != line.get("original_text"))
+        fields_found = sum(1 for f in extracted_fields.values() if f.get("value") is not None)
+        print(f"[OCR] Context-aware processing for '{doc_type_id}': {corrections_made} corrections, {fields_found} fields extracted")
+    
     return {
-        "text_lines": text_lines,
+        "text_lines": corrected_lines,
         "image_bbox": [0, 0, image.width, image.height],
         "document_class": classification,
-        "detection_mode": "multi_pass" if multi_pass else "single_pass"
+        "extracted_fields": extracted_fields,
+        "detection_mode": "multi_pass" if multi_pass else "single_pass",
+        "context_processing": doc_type_id != "unknown"
     }
 
 
@@ -545,31 +667,19 @@ def recognize_region(image_bytes: bytes, bbox: list) -> dict:
     }
 
 
-# Keywords for document classification (English and Russian)
-DOCUMENT_KEYWORDS = {
-    "Receipt": [
-        "receipt", "total", "subtotal", "tax", "payment", "cash", "change",
-        "qty", "price", "amount", "item", "чек", "итого", "сумма", "оплата",
-        "касса", "товар", "цена", "ндс", "скидка"
-    ],
-    "Medication Prescription": [
-        "prescription", "rx", "medication", "dose", "dosage", "tablet", "capsule",
-        "mg", "ml", "take", "daily", "doctor", "patient", "pharmacy", "refill",
-        "рецепт", "препарат", "доза", "таблетка", "капсула", "принимать",
-        "врач", "пациент", "аптека", "лекарство"
-    ],
-    "Form": [
-        "form", "application", "name", "date", "signature", "address", "phone",
-        "email", "please fill", "required", "checkbox", "заявление", "форма",
-        "анкета", "фио", "дата", "подпись", "адрес", "телефон", "заполните"
-    ],
-    "Contract": [
-        "contract", "agreement", "party", "parties", "terms", "conditions",
-        "hereby", "whereas", "witness", "signed", "effective date", "obligations",
-        "договор", "контракт", "соглашение", "сторона", "стороны", "условия",
-        "обязательства", "подписано", "дата вступления"
-    ]
-}
+# Build keywords dict from config
+def get_document_keywords() -> Dict[str, List[str]]:
+    """Get keywords for each document type from config."""
+    keywords = {}
+    for type_id, doc_type in DOCUMENT_TYPES.items():
+        if type_id != "unknown":
+            keywords[doc_type.display_name] = doc_type.keywords_en + doc_type.keywords_ru
+    return keywords
+
+DOCUMENT_KEYWORDS = get_document_keywords()
+
+# Map display names to type IDs
+DISPLAY_NAME_TO_TYPE_ID = {dt.display_name: tid for tid, dt in DOCUMENT_TYPES.items()}
 
 
 def classify_document(text_lines: list) -> dict:
@@ -627,7 +737,7 @@ def classify_image_with_clip(image: Image.Image) -> dict:
         image: PIL Image
         
     Returns:
-        dict: Document class and confidence score
+        dict: Document class, type_id, and confidence score
     """
     try:
         model, processor = get_clip_model()
@@ -653,11 +763,12 @@ def classify_image_with_clip(image: Image.Image) -> dict:
         
         return {
             "class": CLIP_CLASS_NAMES[best_idx],
+            "type_id": CLIP_TYPE_IDS[best_idx],
             "confidence": round(best_prob, 2)
         }
     except Exception as e:
         print(f"CLIP classification error: {e}")
-        return {"class": "Undetected", "confidence": 0.0}
+        return {"class": "Unknown Document", "type_id": "unknown", "confidence": 0.0}
 
 
 def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
@@ -669,7 +780,7 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
         text_lines: List of recognized text lines
         
     Returns:
-        dict: Document class and confidence score
+        dict: Document class, type_id, and confidence score
     """
     # Get image-based classification (CLIP)
     image_result = classify_image_with_clip(image)
@@ -677,12 +788,17 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
     # Get text-based classification
     text_result = classify_document(text_lines)
     
+    # Helper to get type_id from display name
+    def get_type_id(display_name: str) -> str:
+        return DISPLAY_NAME_TO_TYPE_ID.get(display_name, "unknown")
+    
     # Combine results
     # If both methods agree - high confidence
     if image_result["class"] == text_result["class"] and image_result["class"] != "Undetected":
         combined_confidence = min(1.0, (image_result["confidence"] + text_result["confidence"]) / 1.5)
         return {
             "class": image_result["class"],
+            "type_id": image_result.get("type_id", get_type_id(image_result["class"])),
             "confidence": round(combined_confidence, 2),
             "method": "hybrid"
         }
@@ -691,14 +807,16 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
     if text_result["class"] != "Undetected" and text_result["confidence"] >= 0.5:
         return {
             "class": text_result["class"],
+            "type_id": get_type_id(text_result["class"]),
             "confidence": round(text_result["confidence"] * 0.9, 2),
             "method": "text"
         }
     
     # If CLIP has high confidence result - use it
-    if image_result["class"] != "Undetected" and image_result["confidence"] >= 0.3:
+    if image_result["class"] != "Unknown Document" and image_result["confidence"] >= 0.3:
         return {
             "class": image_result["class"],
+            "type_id": image_result.get("type_id", get_type_id(image_result["class"])),
             "confidence": round(image_result["confidence"], 2),
             "method": "image"
         }
@@ -707,16 +825,18 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
     if text_result["class"] != "Undetected":
         return {
             "class": text_result["class"],
+            "type_id": get_type_id(text_result["class"]),
             "confidence": round(text_result["confidence"] * 0.7, 2),
             "method": "text"
         }
     
     # If CLIP has any result
-    if image_result["class"] != "Undetected":
+    if image_result["class"] != "Unknown Document":
         return {
             "class": image_result["class"],
+            "type_id": image_result.get("type_id", get_type_id(image_result["class"])),
             "confidence": round(image_result["confidence"] * 0.7, 2),
             "method": "image"
         }
     
-    return {"class": "Undetected", "confidence": 0.0, "method": "none"}
+    return {"class": "Unknown Document", "type_id": "unknown", "confidence": 0.0, "method": "none"}

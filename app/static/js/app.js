@@ -391,6 +391,15 @@ async function recognizeImage() {
         // Display document class
         updateDocumentClass();
         
+        // Log context-aware processing results
+        if (data.context_processing) {
+            const docType = data.document_class?.type_id || 'unknown';
+            const fields = data.extracted_fields || {};
+            const fieldCount = Object.values(fields).filter(f => f.value !== null).length;
+            console.log(`[Context] Document type: ${docType}`);
+            console.log(`[Context] Extracted ${fieldCount} fields:`, fields);
+        }
+        
         // Enable buttons
         elements.saveBtn.disabled = false;
         elements.addBboxBtn.disabled = false;
