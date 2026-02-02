@@ -57,7 +57,7 @@
             </div>
         </main>
 
-        <!-- Right panel: JSON result -->
+        <!-- Right panel: Results with tabs -->
         <aside class="sidebar right-panel">
             <div class="device-info-container" id="deviceInfoContainer">
                 <div class="device-info-header" onclick="toggleDeviceInfo()">
@@ -117,20 +117,78 @@
                 <span class="document-class-value" id="documentClassValue">-</span>
                 <span class="document-class-confidence" id="documentClassConfidence"></span>
             </div>
-            <h2>OCR Result</h2>
-            <div class="json-container">
-                <pre id="jsonOutput" contenteditable="false">
+            
+            <!-- Tab navigation -->
+            <div class="result-tabs">
+                <button class="tab-btn active" data-tab="json" onclick="switchTab('json')">
+                    📄 JSON
+                </button>
+                <button class="tab-btn" data-tab="llm" onclick="switchTab('llm')">
+                    🤖 LLM Enhanced
+                </button>
+            </div>
+            
+            <!-- JSON Tab Content -->
+            <div class="tab-content active" id="jsonTab">
+                <div class="json-container">
+                    <pre id="jsonOutput" contenteditable="false">
 {
   "text_lines": [],
   "image_bbox": []
 }</pre>
+                </div>
             </div>
+            
+            <!-- LLM Tab Content -->
+            <div class="tab-content" id="llmTab" style="display: none;">
+                <div class="llm-controls">
+                    <div class="llm-status" id="llmStatus">
+                        <span class="status-indicator" id="ollamaStatus">⚪</span>
+                        <span id="ollamaStatusText">Checking Ollama...</span>
+                    </div>
+                    <div class="llm-model-select">
+                        <label for="llmModelSelect">Model:</label>
+                        <select id="llmModelSelect" disabled>
+                            <option value="">Loading...</option>
+                        </select>
+                        <button class="btn btn-small" id="pullModelBtn" disabled title="Pull model if not available">
+                            ⬇️
+                        </button>
+                    </div>
+                    <button class="btn btn-primary" id="processLlmBtn" disabled>
+                        🔄 Process with LLM
+                    </button>
+                </div>
+                <div class="llm-result-container">
+                    <div class="llm-placeholder" id="llmPlaceholder">
+                        <p>Run OCR first, then click "Process with LLM" to enhance results</p>
+                    </div>
+                    <div class="llm-result" id="llmResult" style="display: none;">
+                        <div class="llm-section">
+                            <h4>Enhanced Text</h4>
+                            <div class="llm-text" id="llmEnhancedText"></div>
+                        </div>
+                        <div class="llm-section" id="llmMedicationsSection" style="display: none;">
+                            <h4>Medications Found</h4>
+                            <ul class="llm-medications" id="llmMedications"></ul>
+                        </div>
+                        <div class="llm-meta">
+                            <span>Model: <strong id="llmModelUsed">-</strong></span>
+                        </div>
+                    </div>
+                    <div class="llm-loading" id="llmLoading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>Processing with LLM...</p>
+                    </div>
+                </div>
+            </div>
+            
             <button class="btn btn-success" id="saveBtn" disabled>
                 💾 Save
             </button>
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=6"></script>
+    <script src="/static/js/app.js?v=11"></script>
 </body>
 </html>

@@ -1,12 +1,18 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import uuid
 import os
 
 from app.services.ocr_service import recognize_text, recognize_region, get_device_info
 from app.services.image_service import normalize_image
+from app.services.llm_service import (
+    get_ollama_client, 
+    get_llm_processor, 
+    LLMModel,
+    OllamaClient
+)
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -38,6 +44,23 @@ class NormalizeResponse(BaseModel):
     image_id: str
     normalized: bool
     angle: float
+
+
+class LLMProcessRequest(BaseModel):
+    text: str
+    model: Optional[str] = None
+    document_type: Optional[str] = None
+
+
+class LLMModelInfo(BaseModel):
+    id: str
+    name: str
+    available: bool
+
+
+class LLMStatusResponse(BaseModel):
+    ollama_available: bool
+    models: List[LLMModelInfo]
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -148,3 +171,111 @@ async def recognize_region_endpoint(request: RecognizeRegionRequest):
 async def device_info():
     """Get GPU/device information for OCR and CLIP models."""
     return get_device_info()
+
+
+# =============================================================================
+# LLM Post-Processing Endpoints
+# =============================================================================
+
+@router.get("/llm/status", response_model=LLMStatusResponse)
+async def llm_status():
+    """Check LLM service status and available models."""
+    client = get_ollama_client()
+    ollama_available = await client.is_available()
+    
+    models = []
+    available_models = await client.list_models() if ollama_available else []
+    
+    for model in LLMModel:
+        model_name = model.value.split(":")[0]
+        is_available = any(model_name in m for m in available_models)
+        models.append(LLMModelInfo(
+            id=model.value,
+            name=model.display_name,
+            available=is_available
+        ))
+    
+    return LLMStatusResponse(
+        ollama_available=ollama_available,
+        models=models
+    )
+
+
+@router.post("/llm/pull/{model_id}")
+async def llm_pull_model(model_id: str):
+    """Pull a model from Ollama registry if not available."""
+    client = get_ollama_client()
+    
+    if not await client.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    # Find the model
+    model = LLMModel.from_string(model_id)
+    
+    # Check if already available
+    if await client.is_model_available(model):
+        return {"status": "already_available", "model": model.display_name}
+    
+    # Pull the model (this can take a while)
+    success = await client.pull_model(model)
+    
+    if success:
+        return {"status": "pulled", "model": model.display_name}
+    else:
+        raise HTTPException(status_code=500, detail=f"Failed to pull model {model.display_name}")
+
+
+@router.post("/llm/process")
+async def llm_process_text(request: LLMProcessRequest):
+    """
+    Process OCR text using LLM for improvement.
+    
+    Performs:
+    - Text normalization and denoising
+    - Medicine name recognition (for medical documents)
+    - OCR artifact removal
+    - Improved text grouping
+    """
+    client = get_ollama_client()
+    
+    if not await client.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service not available. Please start Ollama.")
+    
+    # Get model
+    model = LLMModel.from_string(request.model) if request.model else None
+    
+    # Check if model is available
+    if model and not await client.is_model_available(model):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Model {model.display_name} not available. Please pull it first."
+        )
+    
+    processor = get_llm_processor()
+    
+    # Process based on document type
+    if request.document_type in ["prescription", "medical", "medication"]:
+        result = await processor.normalize_medical_text(request.text, model)
+    else:
+        result = await processor.process_text(request.text, model, request.document_type)
+    
+    return result
+
+
+@router.post("/llm/denoise")
+async def llm_denoise_text(request: LLMProcessRequest):
+    """Quick denoising of OCR text - removes artifacts and fixes obvious errors."""
+    client = get_ollama_client()
+    
+    if not await client.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    model = LLMModel.from_string(request.model) if request.model else None
+    processor = get_llm_processor()
+    
+    denoised = await processor.denoise_text(request.text, model)
+    
+    return {
+        "original_text": request.text,
+        "denoised_text": denoised
+    }

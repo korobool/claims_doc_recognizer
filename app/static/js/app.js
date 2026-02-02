@@ -9,7 +9,14 @@ const state = {
     isDrawingMode: false,
     isDrawing: false,
     drawStart: null,
-    deviceInfoExpanded: false
+    deviceInfoExpanded: false,
+    // LLM state
+    llmStatus: {
+        ollamaAvailable: false,
+        models: [],
+        selectedModel: null
+    },
+    llmResult: null
 };
 
 // DOM elements
@@ -53,7 +60,22 @@ const elements = {
     gpuMemory: document.getElementById('gpuMemory'),
     gpuMemoryRow: document.getElementById('gpuMemoryRow'),
     suryaDevice: document.getElementById('suryaDevice'),
-    clipDevice: document.getElementById('clipDevice')
+    clipDevice: document.getElementById('clipDevice'),
+    // LLM elements
+    jsonTab: document.getElementById('jsonTab'),
+    llmTab: document.getElementById('llmTab'),
+    ollamaStatus: document.getElementById('ollamaStatus'),
+    ollamaStatusText: document.getElementById('ollamaStatusText'),
+    llmModelSelect: document.getElementById('llmModelSelect'),
+    pullModelBtn: document.getElementById('pullModelBtn'),
+    processLlmBtn: document.getElementById('processLlmBtn'),
+    llmPlaceholder: document.getElementById('llmPlaceholder'),
+    llmResult: document.getElementById('llmResult'),
+    llmEnhancedText: document.getElementById('llmEnhancedText'),
+    llmMedicationsSection: document.getElementById('llmMedicationsSection'),
+    llmMedications: document.getElementById('llmMedications'),
+    llmModelUsed: document.getElementById('llmModelUsed'),
+    llmLoading: document.getElementById('llmLoading')
 };
 
 // Initialization
@@ -88,6 +110,20 @@ function init() {
     // Fetch device info on load
     console.log('Initializing app, fetching device info...');
     fetchDeviceInfo();
+    
+    // LLM controls
+    if (elements.pullModelBtn) {
+        elements.pullModelBtn.addEventListener('click', pullSelectedModel);
+    }
+    if (elements.processLlmBtn) {
+        elements.processLlmBtn.addEventListener('click', processWithLlm);
+    }
+    if (elements.llmModelSelect) {
+        elements.llmModelSelect.addEventListener('change', handleModelSelect);
+    }
+    
+    // Check LLM status
+    checkLlmStatus();
 }
 
 // === File upload ===
@@ -275,6 +311,9 @@ async function recognizeImage() {
         // Enable buttons
         elements.saveBtn.disabled = false;
         elements.addBboxBtn.disabled = false;
+        
+        // Update LLM process button state
+        updateProcessButtonState();
         
         // Refresh device info (models are now initialized)
         fetchDeviceInfo();
@@ -924,5 +963,240 @@ function toggleDeviceInfo() {
     // Refresh device info when expanding
     if (state.deviceInfoExpanded) {
         fetchDeviceInfo();
+    }
+}
+
+// =============================================================================
+// LLM POST-PROCESSING
+// =============================================================================
+
+function switchTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    
+    // Update tab content
+    if (elements.jsonTab) {
+        elements.jsonTab.style.display = tabName === 'json' ? 'flex' : 'none';
+        elements.jsonTab.classList.toggle('active', tabName === 'json');
+    }
+    if (elements.llmTab) {
+        elements.llmTab.style.display = tabName === 'llm' ? 'flex' : 'none';
+        elements.llmTab.classList.toggle('active', tabName === 'llm');
+    }
+}
+
+async function checkLlmStatus() {
+    try {
+        const response = await fetch('/api/llm/status');
+        if (!response.ok) throw new Error('Failed to check LLM status');
+        
+        const data = await response.json();
+        state.llmStatus.ollamaAvailable = data.ollama_available;
+        state.llmStatus.models = data.models;
+        
+        updateLlmStatusUI();
+    } catch (error) {
+        console.error('LLM status check failed:', error);
+        state.llmStatus.ollamaAvailable = false;
+        updateLlmStatusUI();
+    }
+}
+
+function updateLlmStatusUI() {
+    const { ollamaAvailable, models } = state.llmStatus;
+    
+    // Update status indicator
+    if (elements.ollamaStatus) {
+        elements.ollamaStatus.textContent = ollamaAvailable ? '🟢' : '🔴';
+        elements.ollamaStatus.className = 'status-indicator ' + (ollamaAvailable ? 'online' : 'offline');
+    }
+    if (elements.ollamaStatusText) {
+        elements.ollamaStatusText.textContent = ollamaAvailable ? 'Ollama Connected' : 'Ollama Offline';
+    }
+    
+    // Update model select
+    if (elements.llmModelSelect) {
+        elements.llmModelSelect.innerHTML = '';
+        elements.llmModelSelect.disabled = !ollamaAvailable;
+        
+        if (ollamaAvailable && models.length > 0) {
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name + (model.available ? '' : ' (not pulled)');
+                option.dataset.available = model.available;
+                elements.llmModelSelect.appendChild(option);
+            });
+            
+            // Select first available model
+            const firstAvailable = models.find(m => m.available);
+            if (firstAvailable) {
+                elements.llmModelSelect.value = firstAvailable.id;
+                state.llmStatus.selectedModel = firstAvailable.id;
+            }
+        } else {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = ollamaAvailable ? 'No models' : 'Ollama offline';
+            elements.llmModelSelect.appendChild(option);
+        }
+        
+        handleModelSelect();
+    }
+}
+
+function handleModelSelect() {
+    if (!elements.llmModelSelect) return;
+    
+    const selectedOption = elements.llmModelSelect.selectedOptions[0];
+    const isAvailable = selectedOption?.dataset.available === 'true';
+    
+    state.llmStatus.selectedModel = elements.llmModelSelect.value;
+    
+    // Update pull button
+    if (elements.pullModelBtn) {
+        elements.pullModelBtn.disabled = !state.llmStatus.ollamaAvailable || isAvailable;
+        elements.pullModelBtn.title = isAvailable ? 'Model already available' : 'Pull model from registry';
+    }
+    
+    // Update process button
+    updateProcessButtonState();
+}
+
+function updateProcessButtonState() {
+    if (!elements.processLlmBtn) return;
+    
+    const hasOcr = state.ocrResult && state.ocrResult.text_lines && state.ocrResult.text_lines.length > 0;
+    const hasModel = state.llmStatus.ollamaAvailable && state.llmStatus.selectedModel;
+    const selectedOption = elements.llmModelSelect?.selectedOptions[0];
+    const modelAvailable = selectedOption?.dataset.available === 'true';
+    
+    elements.processLlmBtn.disabled = !hasOcr || !hasModel || !modelAvailable;
+}
+
+async function pullSelectedModel() {
+    const modelId = state.llmStatus.selectedModel;
+    if (!modelId) return;
+    
+    elements.pullModelBtn.disabled = true;
+    elements.pullModelBtn.textContent = '⏳';
+    
+    try {
+        const response = await fetch(`/api/llm/pull/${encodeURIComponent(modelId)}`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) throw new Error('Failed to pull model');
+        
+        const data = await response.json();
+        console.log('Model pull result:', data);
+        
+        // Refresh status
+        await checkLlmStatus();
+        
+    } catch (error) {
+        console.error('Model pull failed:', error);
+        alert('Failed to pull model: ' + error.message);
+    } finally {
+        elements.pullModelBtn.textContent = '⬇️';
+    }
+}
+
+async function processWithLlm() {
+    if (!state.ocrResult || !state.ocrResult.text_lines) {
+        alert('No OCR results to process');
+        return;
+    }
+    
+    const modelId = state.llmStatus.selectedModel;
+    if (!modelId) {
+        alert('No model selected');
+        return;
+    }
+    
+    // Get document type from OCR result
+    const docType = state.ocrResult.document_class?.type_id || 
+                    state.ocrResult.document_class?.class?.toLowerCase() || 
+                    null;
+    
+    // Combine text lines into single text
+    const fullText = state.ocrResult.text_lines
+        .map(line => line.text)
+        .join('\n');
+    
+    // Show loading
+    showLlmLoading(true);
+    
+    try {
+        const response = await fetch('/api/llm/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: fullText,
+                model: modelId,
+                document_type: docType
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'LLM processing failed');
+        }
+        
+        const result = await response.json();
+        state.llmResult = result;
+        
+        displayLlmResult(result);
+        
+    } catch (error) {
+        console.error('LLM processing failed:', error);
+        alert('LLM processing failed: ' + error.message);
+        showLlmLoading(false);
+    }
+}
+
+function showLlmLoading(show) {
+    if (elements.llmPlaceholder) elements.llmPlaceholder.style.display = 'none';
+    if (elements.llmResult) elements.llmResult.style.display = show ? 'none' : 'block';
+    if (elements.llmLoading) elements.llmLoading.style.display = show ? 'flex' : 'none';
+}
+
+function displayLlmResult(result) {
+    showLlmLoading(false);
+    
+    if (!result.success) {
+        if (elements.llmPlaceholder) {
+            elements.llmPlaceholder.innerHTML = `<p>Error: ${result.error || 'Processing failed'}</p>`;
+            elements.llmPlaceholder.style.display = 'flex';
+        }
+        if (elements.llmResult) elements.llmResult.style.display = 'none';
+        return;
+    }
+    
+    if (elements.llmResult) elements.llmResult.style.display = 'block';
+    if (elements.llmPlaceholder) elements.llmPlaceholder.style.display = 'none';
+    
+    // Display enhanced text
+    if (elements.llmEnhancedText) {
+        elements.llmEnhancedText.textContent = result.processed_text || '';
+    }
+    
+    // Display medications if present
+    if (result.medications && result.medications.length > 0) {
+        if (elements.llmMedicationsSection) elements.llmMedicationsSection.style.display = 'block';
+        if (elements.llmMedications) {
+            elements.llmMedications.innerHTML = result.medications
+                .map(med => `<li>${med}</li>`)
+                .join('');
+        }
+    } else {
+        if (elements.llmMedicationsSection) elements.llmMedicationsSection.style.display = 'none';
+    }
+    
+    // Display model used
+    if (elements.llmModelUsed) {
+        elements.llmModelUsed.textContent = result.model || 'Unknown';
     }
 }
