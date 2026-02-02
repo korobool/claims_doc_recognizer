@@ -8,7 +8,7 @@ Observations:
 * Works well even for complex handwritten text for significant number of languages
 * Can be integrated into claims processing pipelines easily
 * Works on local machine, it is applicable for sensitive data processing so that you can comply with even very strict security standards in EU, UK and US including GDPR, ISO27001, FDA etc.
-* Analysis of licensing terms, commercial use implications, and pricing for all software components shows that small business can afford this in most cases. See [LICENSE_AND_PRICING.md](LICENSE_AND_PRICING.md)
+* Analysis of licensing terms, commercial use implications, and pricing for all software components shows that small business can afford this in most cases. See [COMPONENTS_LICENSE_OVERVIEW.md](COMPONENTS_LICENSE_OVERVIEW.md)
 * Companies form domains like insurance, financial, healthcare and similar might be interested.
 
 ![Pipeline](pipeline.png)
@@ -145,7 +145,7 @@ document_recognition_local/
 ├── requirements.txt         # Python dependencies (excl. PyTorch)
 ├── TECHNICAL_SPEC.md        # Technical specification
 ├── DEVELOPER_GUIDE.md       # Developer guide with code examples
-└── LICENSE_AND_PRICING.md   # Licensing and pricing analysis
+└── COMPONENTS_LICENSE_OVERVIEW.md  # Component licensing overview
 ```
 
 ## API
@@ -178,4 +178,4 @@ document_recognition_local/
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed technical architecture (for articles/infographics)
 - **[TECHNICAL_SPEC.md](TECHNICAL_SPEC.md)** - Complete technical specification
 - **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** - Developer guide with code examples
-- **[LICENSE_AND_PRICING.md](LICENSE_AND_PRICING.md)** - Licensing and pricing analysis
+- **[COMPONENTS_LICENSE_OVERVIEW.md](COMPONENTS_LICENSE_OVERVIEW.md)** - Component licensing overview
