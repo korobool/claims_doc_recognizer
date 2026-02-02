@@ -1,207 +1,63 @@
-# Receipt / Invoice Document Schema
-# This schema defines the structure for extracting data from pharmacy receipts and invoices
-
+# Receipt/Invoice Schema - Simplified for List Extraction
 type_id: receipt
-display_name: Pharmacy Receipt
+display_name: Receipt / Invoice
 
-# Prompts used for CLIP-based document classification
 clip_prompts:
-  - "a pharmacy receipt or sales receipt"
-  - "a purchase receipt with medications and prices"
-  - "a retail pharmacy transaction receipt"
-  - "a drugstore receipt"
-  - "a medical supply receipt"
+  - "a store receipt or sales receipt"
+  - "a pharmacy receipt"
+  - "a purchase receipt with items and prices"
 
-# Keywords for text-based classification
 keywords:
   - total
   - subtotal
   - tax
   - receipt
-  - invoice
-  - qty
   - price
+  - qty
   - amount
   - paid
-  - change
-  - cash
-  - card
-  - pharmacy
-  - rx
-  - copay
-  - insurance
-  - deductible
 
-# Context provided to LLM for understanding this document type
 llm_context: |
-  You are processing a PHARMACY RECEIPT or INVOICE document.
+  This is a RECEIPT or INVOICE. Your main task is to extract the LIST OF PURCHASED ITEMS with prices.
+  
+  Fix common OCR errors:
+  - "$" may appear as "S", decimal points may be commas
+  - "0" vs "O" confusion in prices
+  
+  For pharmacy receipts, items may include medication names.
 
-  Key characteristics:
-  - Contains pharmacy/store name and address
-  - Lists purchased medications with quantities and prices
-  - Shows subtotal, tax, insurance adjustments, and total amounts
-  - May have prescription numbers (Rx#) for each medication
-  - Often includes copay amounts and insurance information
-  - May show original price vs. insurance-adjusted price
-
-  Common OCR errors in receipts:
-  - Dollar amounts: "$" may be read as "S" or missing
-  - Decimal points may be confused with commas
-  - "0" and "O" confusion in prices
-  - Medication names may be abbreviated or truncated
-  - Tax rates and percentages need careful extraction
-
-  Price-related terms:
-  - "COPAY" - patient's share after insurance
-  - "INS PAID" - amount paid by insurance
-  - "RETAIL" - original price before insurance
-  - "SAVINGS" - discount from insurance
-
-# Fields to extract from this document type
 fields:
-  # Store/Pharmacy Information
-  - name: pharmacy_name
+  - name: store_name
     type: text
-    description: "Name of the pharmacy or store"
+    description: "Store or pharmacy name"
     required: true
 
-  - name: pharmacy_address
-    type: address
-    description: "Full address of the pharmacy"
-    required: false
-
-  - name: pharmacy_phone
-    type: phone
-    description: "Pharmacy phone number"
-    required: false
-
-  - name: store_number
-    type: text
-    description: "Store or location number"
-    required: false
-
-  # Transaction Details
   - name: transaction_date
     type: date
     description: "Date of purchase"
-    required: true
-
-  - name: transaction_time
-    type: text
-    description: "Time of purchase"
     required: false
 
-  - name: receipt_number
-    type: text
-    description: "Receipt or transaction number"
-    required: false
-
-  - name: cashier
-    type: text
-    description: "Cashier name or ID"
-    required: false
-
-  # Purchased Items - Main list
   - name: items
     type: list
-    description: "List of purchased items. Each item should include: name, quantity, unit price, and total price. For medications, also include Rx number if present."
+    description: "List of purchased items. Each item should have: name, quantity, price"
     required: true
-    list_item_schema:
-      - item_name: "Name of the item or medication"
-      - rx_number: "Prescription number if applicable"
-      - quantity: "Number of units purchased"
-      - unit_price: "Price per unit"
-      - total_price: "Total price for this item (quantity × unit price)"
-      - is_prescription: "Whether this is a prescription medication"
-      - copay: "Copay amount if applicable"
-      - insurance_paid: "Amount paid by insurance"
-      - original_price: "Original retail price before insurance"
 
-  # Financial Summary
   - name: subtotal
     type: currency
-    description: "Subtotal before tax and adjustments"
+    description: "Subtotal before tax"
     required: false
 
-  - name: tax_rate
-    type: text
-    description: "Tax rate percentage"
-    required: false
-
-  - name: tax_amount
+  - name: tax
     type: currency
     description: "Tax amount"
     required: false
 
-  - name: discount_amount
-    type: currency
-    description: "Any discounts applied"
-    required: false
-
-  - name: insurance_total
-    type: currency
-    description: "Total amount paid by insurance"
-    required: false
-
   - name: total
     type: currency
-    description: "Total amount paid by customer"
+    description: "Total amount paid"
     required: true
 
-  # Payment Information
   - name: payment_method
     type: text
-    description: "Payment method (cash, credit card, debit, etc.)"
-    required: false
-
-  - name: card_type
-    type: text
-    description: "Credit/debit card type if applicable (Visa, Mastercard, etc.)"
-    required: false
-
-  - name: card_last_four
-    type: text
-    description: "Last 4 digits of card number"
-    required: false
-
-  - name: amount_tendered
-    type: currency
-    description: "Amount given by customer"
-    required: false
-
-  - name: change_due
-    type: currency
-    description: "Change returned to customer"
-    required: false
-
-  # Patient/Customer Information
-  - name: patient_name
-    type: person_name
-    description: "Patient name if shown on receipt"
-    required: false
-
-  - name: insurance_provider
-    type: text
-    description: "Insurance company name"
-    required: false
-
-  - name: member_id
-    type: text
-    description: "Insurance member ID"
-    required: false
-
-  # Additional Information
-  - name: pharmacist_name
-    type: person_name
-    description: "Pharmacist who filled the prescription"
-    required: false
-
-  - name: refill_info
-    type: text
-    description: "Refill information or next refill date"
-    required: false
-
-  - name: warnings
-    type: list
-    description: "Any medication warnings or notes printed on receipt"
+    description: "Payment method (cash, card, etc.)"
     required: false

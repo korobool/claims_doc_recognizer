@@ -1,170 +1,50 @@
-# Medical Prescription Document Schema
-# This schema defines the structure for extracting data from prescription documents
-
+# Medical Prescription Schema - Simplified for List Extraction
 type_id: prescription
 display_name: Medical Prescription
 
-# Prompts used for CLIP-based document classification
 clip_prompts:
   - "a medical prescription document"
   - "a doctor's prescription with medication names"
   - "a pharmacy prescription form"
-  - "a handwritten or printed medical prescription"
-  - "an Rx prescription pad"
 
-# Keywords for text-based classification
 keywords:
   - rx
   - prescription
   - medication
-  - dosage
-  - refill
-  - pharmacy
   - mg
-  - mcg
   - tablet
   - capsule
-  - doctor
-  - md
-  - npi
-  - sig
-  - dispense
   - take
   - daily
-  - twice
-  - three times
 
-# Context provided to LLM for understanding this document type
 llm_context: |
-  You are processing a MEDICAL PRESCRIPTION document.
-  This is sensitive medical data requiring accurate extraction.
+  This is a MEDICAL PRESCRIPTION. Your main task is to extract the LIST OF MEDICATIONS.
+  
+  Fix common OCR errors:
+  - "Amoxici11in" → "Amoxicillin", "5OOmg" → "500mg", "1OO" → "100"
+  - "0" (zero) vs "O" (letter) in dosages
+  
+  Latin abbreviations:
+  - bid = twice daily, tid = three times daily, qid = four times daily
+  - PRN = as needed, SIG = instructions
 
-  Key characteristics of prescriptions:
-  - Contains patient name and sometimes date of birth
-  - Has prescriber/doctor information (name, license, DEA number)
-  - Lists medications with dosages, quantities, and instructions
-  - May include pharmacy information
-  - Often has Rx symbol or prescription number
-
-  Common OCR errors in medical documents:
-  - Medication names are often misspelled (e.g., "Amoxici11in" → "Amoxicillin")
-  - Dosages may have character confusion (e.g., "5OOmg" → "500mg", "1OO" → "100")
-  - "mg" vs "mcg" confusion is critical - preserve carefully
-  - Roman numerals in quantities (e.g., "ii" = 2, "iii" = 3)
-  - Latin abbreviations: "bid" (twice daily), "tid" (three times daily), "qid" (four times daily)
-  - "PRN" means "as needed"
-  - "SIG" means instructions/directions
-
-  Common medication categories:
-  - Antibiotics: Amoxicillin, Azithromycin, Ciprofloxacin, Doxycycline
-  - Pain relievers: Ibuprofen, Acetaminophen, Naproxen, Tramadol
-  - Cardiovascular: Lisinopril, Metoprolol, Amlodipine, Atorvastatin
-  - Diabetes: Metformin, Insulin, Glipizide, Januvia
-  - Mental health: Sertraline, Fluoxetine, Alprazolam, Lorazepam
-
-# Fields to extract from this document type
 fields:
-  # Patient Information
   - name: patient_name
-    type: person_name
-    description: "Full name of the patient"
+    type: text
+    description: "Patient's full name"
     required: true
 
-  - name: patient_dob
-    type: date
-    description: "Patient's date of birth"
-    required: false
-
-  - name: patient_address
-    type: address
-    description: "Patient's address if present"
-    required: false
-
-  # Prescriber Information
-  - name: prescriber_name
-    type: person_name
-    description: "Doctor or prescriber's full name with credentials (MD, DO, NP, PA)"
-    required: true
-
-  - name: prescriber_npi
-    type: text
-    description: "National Provider Identifier (10-digit number)"
-    required: false
-
-  - name: prescriber_dea
-    type: text
-    description: "DEA number for controlled substances"
-    required: false
-
-  - name: prescriber_phone
-    type: phone
-    description: "Prescriber's phone number"
-    required: false
-
-  - name: prescriber_address
-    type: address
-    description: "Prescriber's office address"
-    required: false
-
-  # Prescription Details
   - name: prescription_date
     type: date
-    description: "Date the prescription was written"
-    required: true
-
-  - name: prescription_number
-    type: text
-    description: "Prescription or Rx number"
+    description: "Date of prescription"
     required: false
 
-  # Medications - This is the main list
+  - name: prescriber_name
+    type: text
+    description: "Doctor/prescriber name"
+    required: false
+
   - name: medications
     type: list
-    description: "List of prescribed medications. Each medication should include: name, strength/dosage (e.g., 500mg), form (tablet, capsule, liquid), quantity dispensed, instructions (SIG), and refills allowed"
+    description: "List of prescribed medications. Each item should have: name, dosage (e.g. 500mg), quantity, instructions (e.g. take twice daily)"
     required: true
-    list_item_schema:
-      - medication_name: "Name of the medication"
-      - strength: "Dosage strength (e.g., 500mg, 10mg/5ml)"
-      - form: "Form of medication (tablet, capsule, liquid, injection, cream, etc.)"
-      - quantity: "Number of units to dispense"
-      - instructions: "How to take the medication (SIG)"
-      - frequency: "How often to take (daily, twice daily, as needed, etc.)"
-      - duration: "How long to take (e.g., 10 days, 30 days)"
-      - refills: "Number of refills allowed for this medication"
-
-  # Pharmacy Information
-  - name: pharmacy_name
-    type: text
-    description: "Pharmacy name if specified"
-    required: false
-
-  - name: pharmacy_address
-    type: address
-    description: "Pharmacy address"
-    required: false
-
-  - name: pharmacy_phone
-    type: phone
-    description: "Pharmacy phone number"
-    required: false
-
-  # Additional Information
-  - name: diagnosis
-    type: text
-    description: "Diagnosis or condition being treated"
-    required: false
-
-  - name: allergies
-    type: list
-    description: "Patient allergies if noted"
-    required: false
-
-  - name: special_instructions
-    type: text
-    description: "Any special instructions or notes from the prescriber"
-    required: false
-
-  - name: signature_present
-    type: boolean
-    description: "Whether prescriber signature is present"
-    required: false

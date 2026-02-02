@@ -337,48 +337,40 @@ IMPORTANT: Always respond with valid JSON only. No explanations or commentary ou
     
     def _build_extraction_prompt(self, text: str, schema: DocumentSchema) -> str:
         """Build a context-aware extraction prompt based on document schema."""
-        fields_json = []
+        # Build simple field descriptions
+        field_descriptions = []
         for field in schema.fields:
-            field_info = {
-                "name": field.name,
-                "type": field.field_type.value,
-                "description": field.description,
-                "required": field.required
-            }
-            fields_json.append(field_info)
+            req = "*" if field.required else ""
+            field_descriptions.append(f"  - {field.name}{req}: {field.description}")
         
-        prompt = f"""You are processing a **{schema.display_name}** document.
+        fields_text = "\n".join(field_descriptions)
+        
+        prompt = f"""DOCUMENT TYPE DETECTED: {schema.display_name.upper()}
 
 {schema.llm_context}
 
----
-OCR TEXT TO PROCESS:
----
+=== RAW OCR TEXT (may contain errors) ===
 {text}
----
+=== END OCR TEXT ===
 
-TASK:
-1. Correct any OCR errors in the text above
-2. Extract the following fields from the document:
+EXTRACT THESE FIELDS (* = required):
+{fields_text}
 
-{json.dumps(fields_json, indent=2)}
+IMPORTANT FOR LIST FIELDS:
+- For "medications" list: extract each medication with name, dosage, quantity, instructions
+- For "items" list: extract each item with name, quantity, price
 
-RESPONSE FORMAT:
-Return a JSON object with this exact structure:
+Return ONLY this JSON (no other text):
 {{
-  "corrected_text": "The full corrected text with OCR errors fixed",
+  "corrected_text": "OCR text with errors fixed",
   "extracted_fields": {{
-    "field_name": "extracted value or null if not found",
-    ...
-  }},
-  "confidence_notes": "Brief notes on extraction confidence or issues"
-}}
-
-For list-type fields, return an array of items.
-For fields not found in the document, use null.
-Ensure all required fields are attempted.
-
-Respond with ONLY the JSON object, no other text."""
+    "field_name": "value or null",
+    "list_field": [
+      {{"name": "...", "dosage": "...", "quantity": "...", "instructions": "..."}},
+      ...
+    ]
+  }}
+}}"""
         
         return prompt
     
