@@ -1420,34 +1420,29 @@ function switchMainTab(tabName) {
     const schemasTab = document.getElementById('schemasTab');
     const settingsTab = document.getElementById('settingsTab');
     
-    // Deactivate all tabs
+    // Deactivate all tabs - use classList only, not inline styles
     [viewerTabBtn, llmTabBtn, schemasTabBtn, settingsTabBtn].forEach(btn => btn?.classList.remove('active'));
     [viewerTab, llmMainTab, schemasTab, settingsTab].forEach(tab => {
         if (tab) {
-            tab.style.display = 'none';
             tab.classList.remove('active');
         }
     });
     
     if (tabName === 'viewer') {
         viewerTabBtn.classList.add('active');
-        viewerTab.style.display = 'flex';
         viewerTab.classList.add('active');
     } else if (tabName === 'llm') {
         llmTabBtn.classList.add('active');
-        llmMainTab.style.display = 'flex';
         llmMainTab.classList.add('active');
         // Update LLM results tab UI
         updateLlmResultsTab();
     } else if (tabName === 'schemas') {
         schemasTabBtn.classList.add('active');
-        schemasTab.style.display = 'flex';
         schemasTab.classList.add('active');
         // Load schemas when switching to tab
         loadSchemaList();
     } else if (tabName === 'settings') {
         settingsTabBtn.classList.add('active');
-        settingsTab.style.display = 'flex';
         settingsTab.classList.add('active');
         // Update settings UI
         updateSettingsUI();

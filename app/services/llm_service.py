@@ -597,7 +597,7 @@ Cleaned text:"""
 class GeminiClient:
     """Client for Google Gemini API."""
     
-    GEMINI_MODEL = "gemini-2.5-pro-preview-05-06"
+    GEMINI_MODEL = "gemini-2.5-pro"
     GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
     
     def __init__(self, api_key: str = None):
