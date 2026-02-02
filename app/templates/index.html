@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Recognition System</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Left panel: upload and image list -->
+        <aside class="sidebar left-panel">
+            <h2>Images</h2>
+            <div class="upload-area" id="uploadArea">
+                <input type="file" id="fileInput" multiple accept="image/*" hidden>
+                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                    📁 Upload
+                </button>
+                <p class="hint">or drag and drop files here</p>
+            </div>
+            <div class="image-list" id="imageList">
+                <!-- List of uploaded images -->
+            </div>
+        </aside>
+
+        <!-- Center panel: view and process -->
+        <main class="main-panel">
+            <div class="toolbar">
+                <button class="btn" id="normalizeBtn" disabled>
+                    🔄 Normalize
+                </button>
+                <button class="btn btn-primary" id="recognizeBtn" disabled>
+                    🔍 Recognize
+                </button>
+                <button class="btn" id="addBboxBtn" disabled>
+                    ✏️ Add BBox
+                </button>
+            </div>
+            <div class="image-viewer" id="imageViewer">
+                <div class="placeholder" id="placeholder">
+                    <p>Select an image to view</p>
+                </div>
+                <div class="zoom-wrapper" id="zoomWrapper" style="display: none;">
+                    <div class="image-container" id="imageContainer">
+                        <img id="mainImage" src="" alt="Document">
+                        <div class="text-overlay" id="textOverlay">
+                            <!-- Editable text blocks -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="zoom-controls" id="zoomControls" style="display: none;">
+                <button class="zoom-btn" id="zoomOutBtn" title="Zoom out (Ctrl+-)">−</button>
+                <input type="range" id="zoomSlider" min="25" max="300" value="100" step="5">
+                <button class="zoom-btn" id="zoomInBtn" title="Zoom in (Ctrl++)">+</button>
+                <span class="zoom-value" id="zoomValue">100%</span>
+            </div>
+        </main>
+
+        <!-- Right panel: JSON result -->
+        <aside class="sidebar right-panel">
+            <div class="document-class-container" id="documentClassContainer" style="display: none;">
+                <span class="document-class-label">Document Type:</span>
+                <span class="document-class-value" id="documentClassValue">-</span>
+                <span class="document-class-confidence" id="documentClassConfidence"></span>
+            </div>
+            <h2>OCR Result</h2>
+            <div class="json-container">
+                <pre id="jsonOutput" contenteditable="false">
+{
+  "text_lines": [],
+  "image_bbox": []
+}</pre>
+            </div>
+            <button class="btn btn-success" id="saveBtn" disabled>
+                💾 Save
+            </button>
+        </aside>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
