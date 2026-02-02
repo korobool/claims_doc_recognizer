@@ -9,10 +9,12 @@ A comprehensive guide to building a production-ready document OCR application wi
 3. [Document Deskewing with Projection Profile Analysis](#document-deskewing-with-projection-profile-analysis)
 4. [OCR with Surya](#ocr-with-surya)
 5. [Hybrid Document Classification with CLIP](#hybrid-document-classification-with-clip)
-6. [Building the REST API](#building-the-rest-api)
-7. [Frontend Implementation](#frontend-implementation)
-8. [Complete Code Reference](#complete-code-reference)
-9. [Deployment and Performance](#deployment-and-performance)
+6. [LLM Post-Processing](#llm-post-processing)
+7. [Document Schema System](#document-schema-system)
+8. [Building the REST API](#building-the-rest-api)
+9. [Frontend Implementation](#frontend-implementation)
+10. [Complete Code Reference](#complete-code-reference)
+11. [Deployment and Performance](#deployment-and-performance)
 
 ---
 
@@ -23,6 +25,8 @@ This guide walks through building a complete document recognition system that ru
 - **Document deskewing** - Automatically straighten rotated scans
 - **OCR** - Extract text with bounding boxes and confidence scores
 - **Classification** - Identify document types (receipts, prescriptions, forms, contracts)
+- **LLM Post-Processing** - Structured field extraction with local or cloud LLMs
+- **Schema System** - YAML-based document templates for customizable extraction
 - **Interactive editing** - Manual corrections via web UI
 
 All processing happens on-device with no cloud dependencies after initial model downloads.
@@ -39,6 +43,9 @@ All processing happens on-device with no cloud dependencies after initial model 
 | OCR Engine | Surya OCR | State-of-the-art accuracy, 90+ languages, open source |
 | Image Processing | OpenCV + SciPy | Industry standard, comprehensive algorithms |
 | Classification | CLIP | Zero-shot capability, no training required |
+| LLM Local | Ollama | Privacy-preserving local inference, multiple models |
+| LLM Cloud | Google Gemini | Optional high-quality cloud inference |
+| Schema System | YAML + Python | Human-readable, easy to customize |
 | Frontend | Vanilla JS | No build step, simple deployment |
 
 ### Dependencies
@@ -58,6 +65,8 @@ scipy>=1.10.0
 transformers>=4.36.0
 torch>=2.0.0
 requests>=2.31.0
+httpx>=0.25.0      # LLM API clients
+pyyaml>=6.0.0      # Schema parsing
 ```
 
 **Documentation Links:**
@@ -66,6 +75,8 @@ requests>=2.31.0
 - OpenCV: https://docs.opencv.org/4.x/
 - CLIP: https://huggingface.co/openai/clip-vit-base-patch32
 - SciPy ndimage: https://docs.scipy.org/doc/scipy/reference/ndimage.html
+- Ollama: https://ollama.com/
+- Google Gemini API: https://ai.google.dev/
 
 ---
 
@@ -604,6 +615,156 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
     
     return {"class": "Undetected", "confidence": 0.0, "method": "none"}
 ```
+
+---
+
+## LLM Post-Processing
+
+After OCR extracts raw text, LLM post-processing provides structured field extraction and OCR error correction.
+
+### Architecture
+
+The system supports two LLM backends:
+- **Ollama** (local) - Privacy-preserving, runs on-device
+- **Google Gemini** (cloud) - Optional, requires API key
+
+### Ollama Client
+
+```python
+# app/services/llm_service.py
+import httpx
+import json
+
+class OllamaClient:
+    """Client for Ollama local LLM API."""
+    
+    def __init__(self, base_url: str = "http://localhost:11434"):
+        self.base_url = base_url
+    
+    async def generate(self, prompt: str, model: str = "devstral:24b",
+                       system_prompt: str = None) -> str:
+        """Generate text using Ollama API."""
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False
+            }
+            if system_prompt:
+                payload["system"] = system_prompt
+            
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json().get("response", "")
+```
+
+### Schema-Based Extraction
+
+The LLM processor uses document schemas to build context-aware prompts:
+
+```python
+class LLMPostProcessor:
+    """Process OCR text with LLM for structured extraction."""
+    
+    def _build_extraction_prompt(self, text: str, schema: DocumentSchema) -> str:
+        """Build prompt with document type and field definitions."""
+        field_descriptions = []
+        for field in schema.fields:
+            req = " (REQUIRED)" if field.required else " (optional)"
+            field_type = f"[{field.field_type.value}]"
+            field_descriptions.append(
+                f"  - {field.name} {field_type}{req}: {field.description}"
+            )
+        
+        return f"""=== DOCUMENT CLASSIFICATION ===
+This document has been classified as: **{schema.display_name.upper()}**
+
+=== FIELDS TO EXTRACT ===
+{chr(10).join(field_descriptions)}
+
+=== RAW OCR TEXT ===
+{text}
+=== END OCR TEXT ===
+
+Extract all fields and return as JSON."""
+```
+
+---
+
+## Document Schema System
+
+Schemas define document types and their extractable fields using YAML files.
+
+### Schema Structure
+
+```yaml
+# app/config/schemas/prescription.yaml
+type_id: prescription
+display_name: Medical Prescription
+
+clip_prompts:
+  - "a medical prescription document"
+  - "a doctor's prescription with medication names"
+
+keywords:
+  - rx
+  - prescription
+  - medication
+  - dosage
+
+llm_context: |
+  This is a MEDICAL PRESCRIPTION. Extract medications with dosages.
+  Fix common OCR errors like "5OOmg" → "500mg".
+
+fields:
+  - name: patient_name
+    type: text
+    description: "Patient's full name"
+    required: true
+  
+  - name: medications
+    type: list
+    description: "List of medications with name, dosage, quantity"
+    required: true
+```
+
+### Schema Loading
+
+```python
+# app/config/document_schemas.py
+from pathlib import Path
+import yaml
+
+SCHEMAS_DIR = Path(__file__).parent / "schemas"
+
+def get_schemas() -> Dict[str, DocumentSchema]:
+    """Load all schemas from YAML files."""
+    schemas = {}
+    for yaml_file in SCHEMAS_DIR.glob("*.yaml"):
+        with open(yaml_file, 'r') as f:
+            data = yaml.safe_load(f)
+            schema = DocumentSchema.from_dict(data)
+            schemas[schema.type_id] = schema
+    return schemas
+
+def get_schema(type_id: str) -> DocumentSchema:
+    """Get schema by type_id, fallback to 'unknown'."""
+    schemas = get_schemas()
+    return schemas.get(type_id, schemas.get("unknown"))
+```
+
+### Available Field Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `text` | Plain text string | Patient name |
+| `date` | Date value (YYYY-MM-DD) | Prescription date |
+| `currency` | Monetary amount | Total price |
+| `number` | Numeric value | Quantity |
+| `list` | Array of items | Medications, line items |
 
 ---
 
