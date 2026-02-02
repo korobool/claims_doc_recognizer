@@ -61,8 +61,8 @@ class LLMConfig:
     """Configuration for LLM service."""
     ollama_base_url: str = "http://localhost:11434"
     default_model: LLMModel = LLMModel.DEVSTRAL
-    timeout: float = 120.0  # LLM inference can be slow
-    max_tokens: int = 2048
+    timeout: float = 180.0  # LLM inference can be slow, especially for structured extraction
+    max_tokens: int = 4096
     temperature: float = 0.3  # Lower for more deterministic output
 
 

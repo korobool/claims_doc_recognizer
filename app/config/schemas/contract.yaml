@@ -1,0 +1,100 @@
+# Contract / Legal Document Schema
+# This schema defines the structure for extracting data from contracts and legal documents
+
+type_id: contract
+display_name: Contract / Legal Document
+
+clip_prompts:
+  - "a legal contract or agreement"
+  - "a signed contract document"
+  - "a business agreement or terms"
+  - "a legal document with signatures"
+
+keywords:
+  - agreement
+  - contract
+  - party
+  - parties
+  - hereby
+  - whereas
+  - terms
+  - conditions
+  - signature
+  - witness
+  - notary
+  - effective date
+
+llm_context: |
+  You are processing a CONTRACT or LEGAL DOCUMENT.
+
+  Key characteristics:
+  - Formal legal language and structure
+  - Party names and identifying information
+  - Terms and conditions sections
+  - Signature blocks with dates
+  - May have notarization or witness sections
+
+  Common OCR errors:
+  - Legal terminology may be unfamiliar
+  - Section numbers and references
+  - Party names must be exact
+  - Dates are critical for validity
+
+fields:
+  - name: document_title
+    type: text
+    description: "Title or type of contract"
+    required: true
+
+  - name: parties
+    type: list
+    description: "Names of all parties to the contract"
+    required: true
+    list_item_schema:
+      - party_name: "Full legal name of party"
+      - party_role: "Role in contract (e.g., Buyer, Seller, Landlord, Tenant)"
+      - party_address: "Address if provided"
+
+  - name: effective_date
+    type: date
+    description: "Date contract becomes effective"
+    required: true
+
+  - name: expiration_date
+    type: date
+    description: "Date contract expires"
+    required: false
+
+  - name: contract_value
+    type: currency
+    description: "Monetary value if applicable"
+    required: false
+
+  - name: key_terms
+    type: list
+    description: "Summary of key terms and conditions"
+    required: false
+
+  - name: signatures
+    type: list
+    description: "Signatories with their signature dates"
+    required: false
+    list_item_schema:
+      - signatory_name: "Name of person who signed"
+      - signature_date: "Date of signature"
+      - title: "Title or role of signatory"
+
+  - name: witnesses
+    type: list
+    description: "Witness names if present"
+    required: false
+
+  - name: notary_info
+    type: text
+    description: "Notarization details if present"
+    required: false
+
+  - name: governing_law
+    type: text
+    description: "Jurisdiction or governing law"
+    required: false

@@ -1,0 +1,120 @@
+# Medical Form / Health Record Document Schema
+# This schema defines the structure for extracting data from medical intake forms
+
+type_id: medical_form
+display_name: Medical Form
+
+clip_prompts:
+  - "a medical form or health questionnaire"
+  - "a patient intake form"
+  - "a medical history form"
+  - "a health insurance claim form"
+
+keywords:
+  - patient
+  - medical
+  - history
+  - allergies
+  - insurance
+  - dob
+  - date of birth
+  - emergency contact
+  - physician
+  - symptoms
+  - diagnosis
+
+llm_context: |
+  You are processing a MEDICAL FORM document.
+  This contains sensitive patient health information.
+
+  Key characteristics:
+  - Patient demographic information
+  - Medical history sections
+  - Checkboxes and form fields
+  - May include insurance information
+  - Often has signature lines and dates
+
+  Common OCR errors:
+  - Checkbox states may not be clear (checked vs unchecked)
+  - Handwritten entries mixed with printed text
+  - Medical terminology and abbreviations
+  - ICD codes and procedure codes
+
+fields:
+  - name: patient_name
+    type: person_name
+    description: "Patient's full name"
+    required: true
+
+  - name: patient_dob
+    type: date
+    description: "Patient's date of birth"
+    required: true
+
+  - name: patient_address
+    type: address
+    description: "Patient's address"
+    required: false
+
+  - name: patient_phone
+    type: phone
+    description: "Patient's phone number"
+    required: false
+
+  - name: patient_email
+    type: email
+    description: "Patient's email address"
+    required: false
+
+  - name: emergency_contact
+    type: text
+    description: "Emergency contact name and phone"
+    required: false
+
+  - name: insurance_provider
+    type: text
+    description: "Insurance company name"
+    required: false
+
+  - name: insurance_id
+    type: text
+    description: "Insurance policy/member ID"
+    required: false
+
+  - name: primary_complaint
+    type: text
+    description: "Chief complaint or reason for visit"
+    required: false
+
+  - name: allergies
+    type: list
+    description: "Known allergies (medications, food, environmental)"
+    required: false
+
+  - name: current_medications
+    type: list
+    description: "Current medications with dosages"
+    required: false
+    list_item_schema:
+      - medication_name: "Name of medication"
+      - dosage: "Dosage and frequency"
+
+  - name: medical_history
+    type: list
+    description: "Past medical conditions and surgeries"
+    required: false
+
+  - name: family_history
+    type: text
+    description: "Relevant family medical history"
+    required: false
+
+  - name: form_date
+    type: date
+    description: "Date form was completed"
+    required: false
+
+  - name: physician_name
+    type: person_name
+    description: "Attending physician name"
+    required: false

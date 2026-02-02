@@ -1,0 +1,137 @@
+# Insurance Claim Document Schema
+# This schema defines the structure for extracting data from insurance claim forms
+
+type_id: insurance_claim
+display_name: Insurance Claim
+
+clip_prompts:
+  - "an insurance claim form"
+  - "a health insurance claim"
+  - "a medical billing claim form"
+  - "a CMS-1500 or UB-04 form"
+
+keywords:
+  - claim
+  - insurance
+  - diagnosis
+  - procedure
+  - cpt
+  - icd
+  - npi
+  - provider
+  - patient
+  - charges
+  - billing
+  - copay
+  - deductible
+
+llm_context: |
+  You are processing an INSURANCE CLAIM document.
+  This is a medical billing document requiring precise extraction.
+
+  Key characteristics:
+  - Patient and insured party information
+  - Provider/facility information
+  - Diagnosis codes (ICD-10)
+  - Procedure codes (CPT/HCPCS)
+  - Dates of service
+  - Charges and amounts
+
+  Common OCR errors:
+  - Diagnosis codes are alphanumeric (e.g., "J06.9", "M54.5")
+  - CPT codes are 5 digits
+  - NPI numbers are 10 digits
+  - Dollar amounts need decimal precision
+
+fields:
+  - name: patient_name
+    type: person_name
+    description: "Patient's name"
+    required: true
+
+  - name: patient_dob
+    type: date
+    description: "Patient's date of birth"
+    required: false
+
+  - name: patient_id
+    type: text
+    description: "Patient account number"
+    required: false
+
+  - name: insured_name
+    type: person_name
+    description: "Name of insured (if different from patient)"
+    required: false
+
+  - name: insurance_company
+    type: text
+    description: "Insurance company name"
+    required: true
+
+  - name: insurance_id
+    type: text
+    description: "Insurance member ID"
+    required: true
+
+  - name: group_number
+    type: text
+    description: "Insurance group number"
+    required: false
+
+  - name: provider_name
+    type: text
+    description: "Healthcare provider or facility name"
+    required: true
+
+  - name: provider_npi
+    type: text
+    description: "Provider NPI number (10 digits)"
+    required: false
+
+  - name: provider_address
+    type: address
+    description: "Provider address"
+    required: false
+
+  - name: service_date
+    type: date
+    description: "Date of service"
+    required: true
+
+  - name: diagnosis_codes
+    type: list
+    description: "ICD-10 diagnosis codes"
+    required: true
+    list_item_schema:
+      - code: "ICD-10 code"
+      - description: "Diagnosis description"
+
+  - name: procedure_codes
+    type: list
+    description: "CPT/HCPCS procedure codes"
+    required: false
+    list_item_schema:
+      - code: "CPT or HCPCS code"
+      - description: "Procedure description"
+      - charge: "Charge amount"
+
+  - name: total_charges
+    type: currency
+    description: "Total charges"
+    required: true
+
+  - name: amount_paid
+    type: currency
+    description: "Amount already paid"
+    required: false
+
+  - name: amount_due
+    type: currency
+    description: "Amount due from patient"
+    required: false
+
+  - name: claim_number
+    type: text
+    description: "Claim reference number"
+    required: false
