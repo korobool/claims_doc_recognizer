@@ -196,6 +196,8 @@ async def device_info():
 @router.get("/llm/status", response_model=LLMStatusResponse)
 async def llm_status():
     """Check LLM service status, available models, and acceleration info."""
+    from app.services.llm_service import GEMINI_AVAILABLE, get_gemini_client
+    
     client = get_ollama_client()
     
     # Get system info including acceleration
@@ -234,6 +236,14 @@ async def llm_status():
                 name=f"{display_name} (custom)",
                 available=True
             ))
+    
+    # Add Gemini if API key is available
+    if GEMINI_AVAILABLE:
+        models.append(LLMModelInfo(
+            id="gemini-2.5-pro",
+            name="Gemini 2.5 Pro (Google)",
+            available=True
+        ))
     
     return LLMStatusResponse(
         ollama_available=ollama_available,
@@ -350,6 +360,21 @@ async def llm_process_text(request: LLMProcessRequest):
     
     Returns structured data with extracted fields matching the document schema.
     """
+    from app.services.llm_service import GEMINI_AVAILABLE, get_gemini_processor
+    
+    # Check if Gemini is requested
+    if request.model and request.model.lower().startswith("gemini"):
+        if not GEMINI_AVAILABLE:
+            raise HTTPException(
+                status_code=400,
+                detail="Gemini API key not configured. Set GEMINI_API_KEY environment variable."
+            )
+        
+        processor = get_gemini_processor()
+        result = await processor.process_text(request.text, request.document_type)
+        return result
+    
+    # Otherwise use Ollama
     client = get_ollama_client()
     
     if not await client.is_available():
@@ -580,14 +605,25 @@ async def delete_schema(type_id: str):
 @router.post("/schemas/generate/stream")
 async def generate_schema_with_llm_stream(request: GenerateSchemaRequest):
     """Generate a new schema using LLM with streaming output."""
-    client = get_ollama_client()
+    from app.services.llm_service import GEMINI_AVAILABLE, get_gemini_client
     
-    if not await client.is_available():
-        raise HTTPException(status_code=503, detail="Ollama service not available")
+    # Check if Gemini is requested
+    use_gemini = request.model and request.model.lower().startswith("gemini")
+    
+    if use_gemini:
+        if not GEMINI_AVAILABLE:
+            raise HTTPException(
+                status_code=400,
+                detail="Gemini API key not configured. Set GEMINI_API_KEY environment variable."
+            )
+    else:
+        client = get_ollama_client()
+        if not await client.is_available():
+            raise HTTPException(status_code=503, detail="Ollama service not available")
     
     # Get model ID - handle both predefined and custom models
     model_id = None
-    if request.model:
+    if request.model and not use_gemini:
         # Try to match to predefined model first
         for m in LLMModel:
             if m.value.lower() == request.model.lower():
@@ -595,7 +631,7 @@ async def generate_schema_with_llm_stream(request: GenerateSchemaRequest):
                 break
         if model_id is None:
             model_id = request.model  # Use as custom model ID
-    else:
+    elif not use_gemini:
         model_id = LLMModel.DEVSTRAL.value  # Default model
     
     prompt = f"""Generate a document schema YAML for the following document type:
@@ -621,38 +657,55 @@ Return ONLY valid YAML, no explanations:"""
         """Stream LLM generation as Server-Sent Events."""
         full_response = ""
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as http_client:
-                async with http_client.stream(
-                    "POST",
-                    f"{client.base_url}/api/generate",
-                    json={
-                        "model": model_id,
-                        "prompt": prompt,
-                        "stream": True,
-                        "options": {
-                            "temperature": 0.3,
-                            "num_predict": 2048,
+            if use_gemini:
+                # Use Gemini API (non-streaming, send result at once)
+                gemini_client = get_gemini_client()
+                result = await gemini_client.generate(
+                    prompt=prompt,
+                    temperature=0.3,
+                    max_tokens=2048
+                )
+                if result:
+                    full_response = result
+                    # Send the full response as tokens for UI consistency
+                    yield f"data: {json.dumps({'token': result})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'error': 'Gemini generation failed'})}\n\n"
+                    return
+            else:
+                # Use Ollama with streaming
+                async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as http_client:
+                    async with http_client.stream(
+                        "POST",
+                        f"{client.base_url}/api/generate",
+                        json={
+                            "model": model_id,
+                            "prompt": prompt,
+                            "stream": True,
+                            "options": {
+                                "temperature": 0.3,
+                                "num_predict": 2048,
+                            }
                         }
-                    }
-                ) as response:
-                    if response.status_code != 200:
-                        yield f"data: {json.dumps({'error': 'Failed to start generation'})}\n\n"
-                        return
-                    
-                    async for line in response.aiter_lines():
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                token = data.get("response", "")
-                                full_response += token
-                                
-                                # Send token to client
-                                yield f"data: {json.dumps({'token': token})}\n\n"
-                                
-                                if data.get("done"):
-                                    break
-                            except json.JSONDecodeError:
-                                pass
+                    ) as response:
+                        if response.status_code != 200:
+                            yield f"data: {json.dumps({'error': 'Failed to start generation'})}\n\n"
+                            return
+                        
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    token = data.get("response", "")
+                                    full_response += token
+                                    
+                                    # Send token to client
+                                    yield f"data: {json.dumps({'token': token})}\n\n"
+                                    
+                                    if data.get("done"):
+                                        break
+                                except json.JSONDecodeError:
+                                    pass
             
             # Process final result
             yaml_content = full_response.strip()

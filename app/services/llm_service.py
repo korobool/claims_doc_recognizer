@@ -6,17 +6,24 @@ Provides integration with local LLMs via Ollama for:
 - Medicine name recognition and correction
 - Improved text grouping and structure
 - OCR artifact removal
+
+Also supports Google Gemini API when GEMINI_API_KEY is set.
 """
 
 import asyncio
 import httpx
 import json
+import os
 import re
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 from enum import Enum
 
 from app.config.document_schemas import get_schema, DocumentSchema, FieldSchema
+
+# Check for Gemini API key at module load
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_AVAILABLE = bool(GEMINI_API_KEY)
 
 
 class LLMModel(Enum):
@@ -583,9 +590,255 @@ Cleaned text:"""
         return asyncio.run(self.process_text(text, model, document_type))
 
 
-# Singleton instances
+# =============================================================================
+# GEMINI CLIENT
+# =============================================================================
+
+class GeminiClient:
+    """Client for Google Gemini API."""
+    
+    GEMINI_MODEL = "gemini-2.5-pro-preview-05-06"
+    GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+    
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or GEMINI_API_KEY
+        self.available = bool(self.api_key)
+    
+    def is_available(self) -> bool:
+        """Check if Gemini API is available (API key is set)."""
+        return self.available
+    
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096
+    ) -> Optional[str]:
+        """Generate text using Gemini API."""
+        if not self.available:
+            print("[Gemini] API key not configured")
+            return None
+        
+        print(f"[Gemini] Generating with {self.GEMINI_MODEL}...")
+        print(f"[Gemini] Prompt length: {len(prompt)} chars")
+        
+        # Build the request
+        url = f"{self.GEMINI_API_URL}/{self.GEMINI_MODEL}:generateContent?key={self.api_key}"
+        
+        # Combine system prompt and user prompt
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\n{prompt}"
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": full_prompt}]
+            }],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            }
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(url, json=payload)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Extract text from Gemini response
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        content = candidates[0].get("content", {})
+                        parts = content.get("parts", [])
+                        if parts:
+                            result = parts[0].get("text", "")
+                            print(f"[Gemini] Generation complete ({len(result)} chars)")
+                            return result
+                    print("[Gemini] No content in response")
+                    return None
+                else:
+                    print(f"[Gemini] Error: {response.status_code} - {response.text[:500]}")
+                    return None
+        except Exception as e:
+            print(f"[Gemini] Generation error: {e}")
+            return None
+
+
+class GeminiPostProcessor:
+    """LLM post-processor using Gemini API."""
+    
+    BASE_SYSTEM_PROMPT = LLMPostProcessor.BASE_SYSTEM_PROMPT
+    
+    def __init__(self, client: GeminiClient = None):
+        self.client = client or GeminiClient()
+    
+    def _build_extraction_prompt(self, text: str, schema) -> str:
+        """Build extraction prompt (same as Ollama version)."""
+        field_descriptions = []
+        for field in schema.fields:
+            req = "*" if field.required else ""
+            field_descriptions.append(f"  - {field.name}{req}: {field.description}")
+        
+        fields_text = "\n".join(field_descriptions)
+        
+        prompt = f"""DOCUMENT TYPE DETECTED: {schema.display_name.upper()}
+
+{schema.llm_context}
+
+=== RAW OCR TEXT (may contain errors) ===
+{text}
+=== END OCR TEXT ===
+
+EXTRACT THESE FIELDS (* = required):
+{fields_text}
+
+IMPORTANT FOR LIST FIELDS:
+- For "medications" list: extract each medication with name, dosage, quantity, instructions
+- For "items" list: extract each item with name, quantity, price
+
+Return ONLY this JSON (no other text):
+{{
+  "corrected_text": "OCR text with errors fixed",
+  "extracted_fields": {{
+    "field_name": "value or null",
+    "list_field": [
+      {{"name": "...", "dosage": "...", "quantity": "...", "instructions": "..."}},
+      ...
+    ]
+  }}
+}}"""
+        return prompt
+    
+    def _build_system_prompt(self, schema) -> str:
+        """Build system prompt with document context."""
+        return f"""{self.BASE_SYSTEM_PROMPT}
+
+DOCUMENT CONTEXT:
+{schema.llm_context}"""
+    
+    def _parse_json_response(self, response: str, schema) -> Dict[str, Any]:
+        """Parse LLM JSON response."""
+        if not response:
+            return None
+        
+        response = response.strip()
+        
+        # Handle markdown code blocks
+        if response.startswith("```"):
+            lines = response.split("\n")
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.startswith("```") and not in_json:
+                    in_json = True
+                    continue
+                elif line.startswith("```") and in_json:
+                    break
+                elif in_json:
+                    json_lines.append(line)
+            response = "\n".join(json_lines)
+        
+        # Try to find JSON object
+        json_match = re.search(r'\{[\s\S]*\}', response)
+        if json_match:
+            response = json_match.group()
+        
+        # Fix common JSON escape issues
+        response = re.sub(r'\\([^"\\\/bfnrtu])', r'\\\\\1', response)
+        
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError as e:
+            print(f"[Gemini] JSON parse error: {e}")
+            try:
+                fixed = re.sub(r'\\(?!["\\/bfnrtu])', '', response)
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                return None
+    
+    async def extract_structured(
+        self,
+        text: str,
+        document_type: str
+    ) -> Dict[str, Any]:
+        """Extract structured data using Gemini."""
+        schema = get_schema(document_type)
+        
+        print(f"[Gemini] Extracting structured data for document type: {document_type}")
+        print(f"[Gemini] Using schema: {schema.display_name} ({len(schema.fields)} fields)")
+        
+        prompt = self._build_extraction_prompt(text, schema)
+        system_prompt = self._build_system_prompt(schema)
+        
+        result = await self.client.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=0.1,
+            max_tokens=4096
+        )
+        
+        if not result:
+            return {
+                "success": False,
+                "original_text": text,
+                "error": "Gemini generation failed",
+                "model": "Gemini 2.5 Pro",
+                "document_type": document_type,
+                "extracted_fields": schema.get_default_extraction()
+            }
+        
+        parsed = self._parse_json_response(result, schema)
+        
+        if parsed:
+            extracted = parsed.get("extracted_fields", {})
+            for field in schema.fields:
+                if field.name not in extracted:
+                    extracted[field.name] = field.default
+            
+            return {
+                "success": True,
+                "original_text": text,
+                "corrected_text": parsed.get("corrected_text", text),
+                "extracted_fields": extracted,
+                "confidence_notes": parsed.get("confidence_notes", ""),
+                "model": "Gemini 2.5 Pro",
+                "document_type": document_type,
+                "document_type_name": schema.display_name,
+                "schema_fields": [f.name for f in schema.fields],
+                "required_fields": schema.get_required_fields()
+            }
+        else:
+            return {
+                "success": True,
+                "original_text": text,
+                "corrected_text": result.strip(),
+                "extracted_fields": schema.get_default_extraction(),
+                "confidence_notes": "JSON parsing failed, returning raw corrected text",
+                "model": "Gemini 2.5 Pro",
+                "document_type": document_type,
+                "document_type_name": schema.display_name,
+                "parse_error": True
+            }
+    
+    async def process_text(
+        self,
+        text: str,
+        document_type: str = None
+    ) -> Dict[str, Any]:
+        """Process OCR text using Gemini."""
+        return await self.extract_structured(text, document_type or "unknown")
+
+
+# =============================================================================
+# SINGLETON INSTANCES
+# =============================================================================
+
 _ollama_client: Optional[OllamaClient] = None
 _llm_processor: Optional[LLMPostProcessor] = None
+_gemini_client: Optional[GeminiClient] = None
+_gemini_processor: Optional[GeminiPostProcessor] = None
 
 
 def get_ollama_client() -> OllamaClient:
@@ -602,3 +855,19 @@ def get_llm_processor() -> LLMPostProcessor:
     if _llm_processor is None:
         _llm_processor = LLMPostProcessor(get_ollama_client())
     return _llm_processor
+
+
+def get_gemini_client() -> GeminiClient:
+    """Get or create Gemini client singleton."""
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = GeminiClient()
+    return _gemini_client
+
+
+def get_gemini_processor() -> GeminiPostProcessor:
+    """Get or create Gemini processor singleton."""
+    global _gemini_processor
+    if _gemini_processor is None:
+        _gemini_processor = GeminiPostProcessor(get_gemini_client())
+    return _gemini_processor
