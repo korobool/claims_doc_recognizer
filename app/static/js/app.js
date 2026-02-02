@@ -1371,19 +1371,23 @@ function initSchemaManagement() {
     const viewerTabBtn = document.getElementById('viewerTabBtn');
     const llmTabBtn = document.getElementById('llmTabBtn');
     const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const settingsTabBtn = document.getElementById('settingsTabBtn');
     
     if (viewerTabBtn) viewerTabBtn.addEventListener('click', () => switchMainTab('viewer'));
     if (llmTabBtn) llmTabBtn.addEventListener('click', () => switchMainTab('llm'));
     if (schemasTabBtn) schemasTabBtn.addEventListener('click', () => switchMainTab('schemas'));
+    if (settingsTabBtn) settingsTabBtn.addEventListener('click', () => switchMainTab('settings'));
     
-    // LLM controls in main tab
-    const pullModelBtnMain = document.getElementById('pullModelBtnMain');
+    // LLM controls in Settings tab
+    const pullModelBtn = document.getElementById('pullModelBtn');
+    const llmModelSelect = document.getElementById('llmModelSelect');
+    
+    if (pullModelBtn) pullModelBtn.addEventListener('click', pullSelectedModel);
+    if (llmModelSelect) llmModelSelect.addEventListener('change', handleModelSelect);
+    
+    // Process button in LLM Results tab
     const processLlmBtnMain = document.getElementById('processLlmBtnMain');
-    const llmModelSelectMain = document.getElementById('llmModelSelectMain');
-    
-    if (pullModelBtnMain) pullModelBtnMain.addEventListener('click', pullSelectedModelMain);
     if (processLlmBtnMain) processLlmBtnMain.addEventListener('click', processWithLlmMain);
-    if (llmModelSelectMain) llmModelSelectMain.addEventListener('change', handleModelSelectMain);
     
     // Schema management buttons
     const newSchemaBtn = document.getElementById('newSchemaBtn');
@@ -1410,13 +1414,15 @@ function switchMainTab(tabName) {
     const viewerTabBtn = document.getElementById('viewerTabBtn');
     const llmTabBtn = document.getElementById('llmTabBtn');
     const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const settingsTabBtn = document.getElementById('settingsTabBtn');
     const viewerTab = document.getElementById('viewerTab');
     const llmMainTab = document.getElementById('llmMainTab');
     const schemasTab = document.getElementById('schemasTab');
+    const settingsTab = document.getElementById('settingsTab');
     
     // Deactivate all tabs
-    [viewerTabBtn, llmTabBtn, schemasTabBtn].forEach(btn => btn?.classList.remove('active'));
-    [viewerTab, llmMainTab, schemasTab].forEach(tab => {
+    [viewerTabBtn, llmTabBtn, schemasTabBtn, settingsTabBtn].forEach(btn => btn?.classList.remove('active'));
+    [viewerTab, llmMainTab, schemasTab, settingsTab].forEach(tab => {
         if (tab) {
             tab.style.display = 'none';
             tab.classList.remove('active');
@@ -1431,29 +1437,35 @@ function switchMainTab(tabName) {
         llmTabBtn.classList.add('active');
         llmMainTab.style.display = 'flex';
         llmMainTab.classList.add('active');
-        // Load LLM status when switching to tab
-        updateLlmStatusUIMain();
+        // Update LLM results tab UI
+        updateLlmResultsTab();
     } else if (tabName === 'schemas') {
         schemasTabBtn.classList.add('active');
         schemasTab.style.display = 'flex';
         schemasTab.classList.add('active');
-        
         // Load schemas when switching to tab
         loadSchemaList();
-        loadSchemaLlmModels();
+    } else if (tabName === 'settings') {
+        settingsTabBtn.classList.add('active');
+        settingsTab.style.display = 'flex';
+        settingsTab.classList.add('active');
+        // Update settings UI
+        updateSettingsUI();
     }
 }
 
-// LLM Main Tab Functions
-function updateLlmStatusUIMain() {
-    // Update status indicators in main LLM tab
-    const ollamaStatus = document.getElementById('ollamaStatusMain');
-    const ollamaStatusText = document.getElementById('ollamaStatusTextMain');
-    const accelIcon = document.getElementById('accelIconMain');
-    const accelText = document.getElementById('accelTextMain');
-    const modelSelect = document.getElementById('llmModelSelectMain');
-    const pullBtn = document.getElementById('pullModelBtnMain');
-    const processBtn = document.getElementById('processLlmBtnMain');
+// =============================================================================
+// SETTINGS TAB FUNCTIONS
+// =============================================================================
+
+function updateSettingsUI() {
+    // Update status indicators in Settings tab
+    const ollamaStatus = document.getElementById('ollamaStatusSettings');
+    const ollamaStatusText = document.getElementById('ollamaStatusTextSettings');
+    const accelIcon = document.getElementById('accelIconSettings');
+    const accelText = document.getElementById('accelTextSettings');
+    const modelSelect = document.getElementById('llmModelSelect');
+    const pullBtn = document.getElementById('pullModelBtn');
     
     if (!ollamaStatus) return;
     
@@ -1490,14 +1502,18 @@ function updateLlmStatusUIMain() {
         });
         modelSelect.disabled = false;
         
-        // Select first available model
-        const firstAvailable = state.llmStatus.models.find(m => m.available);
-        if (firstAvailable) {
-            modelSelect.value = firstAvailable.id;
-            state.llmStatus.selectedModel = firstAvailable.id;
+        // Restore or select first available model
+        if (state.llmStatus.selectedModel) {
+            modelSelect.value = state.llmStatus.selectedModel;
+        } else {
+            const firstAvailable = state.llmStatus.models.find(m => m.available);
+            if (firstAvailable) {
+                modelSelect.value = firstAvailable.id;
+                state.llmStatus.selectedModel = firstAvailable.id;
+            }
         }
         
-        handleModelSelectMain();
+        handleModelSelect();
     } else {
         ollamaStatus.textContent = '🔴';
         ollamaStatusText.textContent = 'Ollama Offline';
@@ -1506,14 +1522,12 @@ function updateLlmStatusUIMain() {
         modelSelect.innerHTML = '<option value="">Ollama offline</option>';
         modelSelect.disabled = true;
         pullBtn.disabled = true;
-        processBtn.disabled = true;
     }
 }
 
-function handleModelSelectMain() {
-    const modelSelect = document.getElementById('llmModelSelectMain');
-    const pullBtn = document.getElementById('pullModelBtnMain');
-    const processBtn = document.getElementById('processLlmBtnMain');
+function handleModelSelect() {
+    const modelSelect = document.getElementById('llmModelSelect');
+    const pullBtn = document.getElementById('pullModelBtn');
     
     if (!modelSelect) return;
     
@@ -1522,16 +1536,43 @@ function handleModelSelectMain() {
     
     state.llmStatus.selectedModel = modelSelect.value;
     
+    // Update pull button
     pullBtn.disabled = isAvailable;
-    processBtn.disabled = !isAvailable || !state.ocrResult;
+    
+    // Update LLM Results tab process button
+    updateLlmResultsTab();
 }
 
-async function pullSelectedModelMain() {
-    const modelSelect = document.getElementById('llmModelSelectMain');
-    const pullBtn = document.getElementById('pullModelBtnMain');
-    const progressContainer = document.getElementById('pullProgressMain');
-    const progressFill = document.getElementById('pullProgressFillMain');
-    const progressText = document.getElementById('pullProgressTextMain');
+function updateLlmResultsTab() {
+    const processBtn = document.getElementById('processLlmBtnMain');
+    const modelDisplay = document.getElementById('llmSelectedModelDisplay');
+    
+    // Update selected model display
+    if (modelDisplay) {
+        const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
+        if (selectedModel && selectedModel.available) {
+            modelDisplay.textContent = selectedModel.name;
+        } else if (state.llmStatus.selectedModel) {
+            modelDisplay.textContent = state.llmStatus.selectedModel + ' (not available)';
+        } else {
+            modelDisplay.textContent = 'No model selected';
+        }
+    }
+    
+    // Update process button state
+    if (processBtn) {
+        const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
+        const isAvailable = selectedModel?.available;
+        processBtn.disabled = !isAvailable || !state.ocrResult;
+    }
+}
+
+async function pullSelectedModel() {
+    const modelSelect = document.getElementById('llmModelSelect');
+    const pullBtn = document.getElementById('pullModelBtn');
+    const progressContainer = document.getElementById('pullProgress');
+    const progressFill = document.getElementById('pullProgressFill');
+    const progressText = document.getElementById('pullProgressText');
     
     const modelId = modelSelect.value;
     if (!modelId) return;
@@ -1580,7 +1621,8 @@ async function pullSelectedModelMain() {
                             progressText.textContent = 'Download complete!';
                             progressFill.style.width = '100%';
                             await checkLlmStatus();
-                            updateLlmStatusUIMain();
+                            updateSettingsUI();
+                            updateLlmResultsTab();
                             setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
                         }
                         
@@ -1605,13 +1647,13 @@ async function processWithLlmMain() {
         return;
     }
     
-    const modelSelect = document.getElementById('llmModelSelectMain');
     const processBtn = document.getElementById('processLlmBtnMain');
     const placeholder = document.getElementById('llmPlaceholderMain');
     const resultDiv = document.getElementById('llmResultMain');
     const loadingDiv = document.getElementById('llmLoadingMain');
     
-    const modelId = modelSelect.value;
+    // Use model from shared state (selected in Settings tab)
+    const modelId = state.llmStatus.selectedModel;
     
     processBtn.disabled = true;
     placeholder.style.display = 'none';
@@ -1911,45 +1953,13 @@ async function deleteCurrentSchema() {
     }
 }
 
-async function loadSchemaLlmModels() {
-    const modelSelect = document.getElementById('schemaLlmModel');
-    if (!modelSelect) return;
+function updateSchemaGenerateButton() {
+    // Update generate button based on shared model selection
+    const generateBtn = document.getElementById('generateSchemaBtn');
+    if (!generateBtn) return;
     
-    try {
-        const response = await fetch('/api/llm/status');
-        if (!response.ok) throw new Error('Failed to get LLM status');
-        
-        const data = await response.json();
-        
-        modelSelect.innerHTML = '';
-        
-        if (!data.ollama_available) {
-            modelSelect.innerHTML = '<option value="">Ollama offline</option>';
-            document.getElementById('generateSchemaBtn').disabled = true;
-            return;
-        }
-        
-        data.models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = model.name + (model.available ? '' : ' (not pulled)');
-            option.disabled = !model.available;
-            modelSelect.appendChild(option);
-        });
-        
-        // Select first available model
-        const firstAvailable = data.models.find(m => m.available);
-        if (firstAvailable) {
-            modelSelect.value = firstAvailable.id;
-            document.getElementById('generateSchemaBtn').disabled = false;
-        } else {
-            document.getElementById('generateSchemaBtn').disabled = true;
-        }
-        
-    } catch (error) {
-        console.error('Failed to load LLM models:', error);
-        modelSelect.innerHTML = '<option value="">Error loading models</option>';
-    }
+    const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
+    generateBtn.disabled = !selectedModel?.available || !state.llmStatus.ollamaAvailable;
 }
 
 async function generateSchemaWithLLM() {
@@ -1959,7 +1969,8 @@ async function generateSchemaWithLLM() {
         return;
     }
     
-    const modelId = document.getElementById('schemaLlmModel').value;
+    // Use model from shared state (selected in Settings tab)
+    const modelId = state.llmStatus.selectedModel;
     const generateBtn = document.getElementById('generateSchemaBtn');
     const yamlEditor = document.getElementById('schemaYamlEditor');
     
