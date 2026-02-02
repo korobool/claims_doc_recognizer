@@ -239,18 +239,24 @@ async def llm_pull_model(model_id: str):
 @router.get("/llm/pull/{model_id}/stream")
 async def llm_pull_model_stream(model_id: str):
     """Pull a model with streaming progress updates."""
+    print(f"[LLM Pull] Request to pull model: {model_id}")
     client = get_ollama_client()
     
     if not await client.is_available():
+        print("[LLM Pull] ERROR: Ollama service not available")
         raise HTTPException(status_code=503, detail="Ollama service not available")
     
     model = LLMModel.from_string(model_id)
+    print(f"[LLM Pull] Resolved model: {model.value} ({model.display_name})")
     
     # Check if already available
     if await client.is_model_available(model):
+        print(f"[LLM Pull] Model {model.value} is already available")
         async def already_available():
             yield f"data: {json.dumps({'status': 'already_available', 'model': model.display_name})}\n\n"
         return StreamingResponse(already_available(), media_type="text/event-stream")
+    
+    print(f"[LLM Pull] Starting download of {model.value}...")
     
     async def pull_stream() -> AsyncGenerator[str, None]:
         """Stream pull progress as Server-Sent Events."""
@@ -262,9 +268,11 @@ async def llm_pull_model_stream(model_id: str):
                     json={"name": model.value}
                 ) as response:
                     if response.status_code != 200:
+                        print(f"[LLM Pull] ERROR: Failed to start pull, status {response.status_code}")
                         yield f"data: {json.dumps({'status': 'error', 'error': 'Failed to start pull'})}\n\n"
                         return
                     
+                    last_percent = -1
                     async for line in response.aiter_lines():
                         if line:
                             try:
@@ -272,12 +280,26 @@ async def llm_pull_model_stream(model_id: str):
                                 # Add model info to the progress data
                                 data["model"] = model.display_name
                                 data["model_id"] = model.value
+                                
+                                # Log progress to stdout
+                                if data.get("total") and data.get("completed"):
+                                    percent = int((data["completed"] / data["total"]) * 100)
+                                    if percent != last_percent and percent % 5 == 0:
+                                        completed_mb = data["completed"] / 1024 / 1024
+                                        total_mb = data["total"] / 1024 / 1024
+                                        print(f"[LLM Pull] {model.value}: {completed_mb:.1f} MB / {total_mb:.1f} MB ({percent}%)")
+                                        last_percent = percent
+                                elif data.get("status"):
+                                    print(f"[LLM Pull] {model.value}: {data['status']}")
+                                
                                 yield f"data: {json.dumps(data)}\n\n"
                             except json.JSONDecodeError:
                                 pass
                     
+                    print(f"[LLM Pull] Download complete: {model.value}")
                     yield f"data: {json.dumps({'status': 'complete', 'model': model.display_name})}\n\n"
         except Exception as e:
+            print(f"[LLM Pull] ERROR: {e}")
             yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
     
     return StreamingResponse(pull_stream(), media_type="text/event-stream")

@@ -30,9 +30,16 @@ class LLMModel(Enum):
     @classmethod
     def from_string(cls, model_name: str) -> "LLMModel":
         """Get model enum from string name."""
+        model_lower = model_name.lower()
+        
+        # First try exact match with enum values
+        for model in cls:
+            if model.value.lower() == model_lower:
+                return model
+        
+        # Then try partial matches
         mapping = {
             "devstral": cls.DEVSTRAL,
-            "devstral:24b": cls.DEVSTRAL,
             "qwen2.5": cls.QWEN_2_5,
             "qwen": cls.QWEN_2_5,
             "meditron": cls.LLAMA_MEDITRON,
@@ -41,7 +48,7 @@ class LLMModel(Enum):
             "gpt-oss": cls.GPT_OSS,
             "gpt-oss-20b": cls.GPT_OSS,
         }
-        return mapping.get(model_name.lower(), cls.DEVSTRAL)
+        return mapping.get(model_lower, cls.DEVSTRAL)
     
     @property
     def display_name(self) -> str:
@@ -205,17 +212,21 @@ class OllamaClient:
         model: LLMModel = None,
         system_prompt: str = None,
         temperature: float = None,
-        max_tokens: int = None
+        max_tokens: int = None,
+        stream_to_stdout: bool = True
     ) -> Optional[str]:
-        """Generate text using the specified model."""
+        """Generate text using the specified model with optional streaming output."""
         model = model or self.config.default_model
         temperature = temperature if temperature is not None else self.config.temperature
         max_tokens = max_tokens or self.config.max_tokens
         
+        print(f"[LLM] Generating with {model.display_name}...")
+        print(f"[LLM] Prompt length: {len(prompt)} chars")
+        
         payload = {
             "model": model.value,
             "prompt": prompt,
-            "stream": False,
+            "stream": stream_to_stdout,  # Stream for real-time output
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -227,17 +238,51 @@ class OllamaClient:
         
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json=payload
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("response", "")
+                if stream_to_stdout:
+                    # Stream response and print tokens as they arrive
+                    full_response = ""
+                    print("[LLM] Response: ", end="", flush=True)
+                    
+                    async with client.stream(
+                        "POST",
+                        f"{self.base_url}/api/generate",
+                        json=payload
+                    ) as response:
+                        if response.status_code != 200:
+                            print(f"\n[LLM] Error: {response.status_code}")
+                            return None
+                        
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    token = data.get("response", "")
+                                    full_response += token
+                                    print(token, end="", flush=True)
+                                    
+                                    if data.get("done"):
+                                        break
+                                except json.JSONDecodeError:
+                                    pass
+                    
+                    print()  # Newline after streaming
+                    print(f"[LLM] Generation complete ({len(full_response)} chars)")
+                    return full_response
                 else:
-                    print(f"[LLM] Error: {response.status_code} - {response.text}")
-                    return None
+                    # Non-streaming mode
+                    response = await client.post(
+                        f"{self.base_url}/api/generate",
+                        json=payload
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        result = data.get("response", "")
+                        print(f"[LLM] Generation complete ({len(result)} chars)")
+                        return result
+                    else:
+                        print(f"[LLM] Error: {response.status_code} - {response.text}")
+                        return None
         except Exception as e:
             print(f"[LLM] Generation error: {e}")
             return None
@@ -415,6 +460,9 @@ DOCUMENT CONTEXT:
         """
         model = model or self.client.config.default_model
         schema = get_schema(document_type)
+        
+        print(f"[LLM] Extracting structured data for document type: {document_type}")
+        print(f"[LLM] Using schema: {schema.display_name} ({len(schema.fields)} fields)")
         
         # Build context-aware prompts
         prompt = self._build_extraction_prompt(text, schema)
