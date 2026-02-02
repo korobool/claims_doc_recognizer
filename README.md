@@ -1,5 +1,13 @@
 # Document Recognition System 
-*Mini-POC using [Surya](https://github.com/datalab-to/surya). General idea is to be able to demo local inference capabilities and simplicity so that OCR can be practically done without external APIs.*
+*Mini-POC using [Surya](https://github.com/datalab-to/surya). 
+General idea is to be able to demo local inference capabilities and simplicity so that OCR can be practically done without external APIs.*
+
+Observations:
+* Text recognition speed on GB10 is appoximately 10 times faster than on Apple silicon (M3)
+* Bounding boxes and recognition can be tunned by config AND finetuning
+* Works well even for complex handwritten text in relatiely significant number of languages
+* Can be integrated into claims processing pipelines easily
+
 ![Pipeline](pipeline.png)
 
 
