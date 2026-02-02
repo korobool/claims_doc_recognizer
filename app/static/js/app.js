@@ -8,7 +8,8 @@ const state = {
     zoomLevel: 100,
     isDrawingMode: false,
     isDrawing: false,
-    drawStart: null
+    drawStart: null,
+    deviceInfoExpanded: false
 };
 
 // DOM elements
@@ -33,7 +34,19 @@ const elements = {
     zoomValue: document.getElementById('zoomValue'),
     documentClassContainer: document.getElementById('documentClassContainer'),
     documentClassValue: document.getElementById('documentClassValue'),
-    documentClassConfidence: document.getElementById('documentClassConfidence')
+    documentClassConfidence: document.getElementById('documentClassConfidence'),
+    // Device info elements
+    deviceInfoStatus: document.getElementById('deviceInfoStatus'),
+    deviceInfoDetails: document.getElementById('deviceInfoDetails'),
+    deviceInfoToggle: document.getElementById('deviceInfoToggle'),
+    cudaAvailable: document.getElementById('cudaAvailable'),
+    cudaVersion: document.getElementById('cudaVersion'),
+    cudaVersionRow: document.getElementById('cudaVersionRow'),
+    gpuName: document.getElementById('gpuName'),
+    gpuNameRow: document.getElementById('gpuNameRow'),
+    mpsAvailable: document.getElementById('mpsAvailable'),
+    suryaDevice: document.getElementById('suryaDevice'),
+    clipDevice: document.getElementById('clipDevice')
 };
 
 // Initialization
@@ -64,6 +77,9 @@ function init() {
     
     // Keyboard zoom (Ctrl++ / Ctrl+-)
     document.addEventListener('keydown', handleKeyboardZoom);
+    
+    // Fetch device info on load
+    fetchDeviceInfo();
 }
 
 // === File upload ===
@@ -767,4 +783,89 @@ function bboxOverlaps(bbox1, bbox2) {
     
     // Consider overlap if intersection > 30% of bbox1
     return intersectArea > bbox1Area * 0.3;
+}
+
+// === Device Info ===
+
+async function fetchDeviceInfo() {
+    try {
+        const response = await fetch('/api/device-info');
+        if (!response.ok) {
+            throw new Error('Failed to fetch device info');
+        }
+        const info = await response.json();
+        updateDeviceInfoUI(info);
+    } catch (error) {
+        console.error('Error fetching device info:', error);
+        elements.deviceInfoStatus.textContent = 'Error';
+        elements.deviceInfoStatus.className = 'device-info-status status-error';
+    }
+}
+
+function updateDeviceInfoUI(info) {
+    // Update CUDA info
+    if (info.cuda_available) {
+        elements.cudaAvailable.textContent = 'Yes';
+        elements.cudaAvailable.className = 'device-value status-gpu';
+        elements.cudaVersionRow.style.display = 'flex';
+        elements.cudaVersion.textContent = info.cuda_version || '-';
+        elements.gpuNameRow.style.display = 'flex';
+        elements.gpuName.textContent = info.gpu_name || '-';
+    } else {
+        elements.cudaAvailable.textContent = 'No';
+        elements.cudaAvailable.className = 'device-value status-cpu';
+    }
+    
+    // Update MPS info
+    if (info.mps_available) {
+        elements.mpsAvailable.textContent = 'Yes';
+        elements.mpsAvailable.className = 'device-value status-gpu';
+    } else {
+        elements.mpsAvailable.textContent = 'No';
+        elements.mpsAvailable.className = 'device-value status-cpu';
+    }
+    
+    // Update Surya device
+    if (info.surya_device) {
+        elements.suryaDevice.textContent = info.surya_device;
+        elements.suryaDevice.className = 'device-value ' + getDeviceStatusClass(info.surya_device);
+    }
+    
+    // Update CLIP device
+    if (info.clip_device) {
+        elements.clipDevice.textContent = info.clip_device;
+        elements.clipDevice.className = 'device-value ' + getDeviceStatusClass(info.clip_device);
+    }
+    
+    // Update status summary
+    const hasGpu = info.cuda_available || info.mps_available;
+    const activeDevice = info.surya_device || info.clip_device;
+    if (activeDevice && (activeDevice.includes('cuda') || activeDevice.includes('mps'))) {
+        elements.deviceInfoStatus.textContent = 'GPU Active';
+        elements.deviceInfoStatus.className = 'device-info-status status-gpu';
+    } else if (hasGpu) {
+        elements.deviceInfoStatus.textContent = 'GPU Available';
+        elements.deviceInfoStatus.className = 'device-info-status status-available';
+    } else {
+        elements.deviceInfoStatus.textContent = 'CPU Only';
+        elements.deviceInfoStatus.className = 'device-info-status status-cpu';
+    }
+}
+
+function getDeviceStatusClass(device) {
+    if (device.includes('cuda') || device.includes('mps')) {
+        return 'status-gpu';
+    }
+    return 'status-cpu';
+}
+
+function toggleDeviceInfo() {
+    state.deviceInfoExpanded = !state.deviceInfoExpanded;
+    elements.deviceInfoDetails.style.display = state.deviceInfoExpanded ? 'block' : 'none';
+    elements.deviceInfoToggle.textContent = state.deviceInfoExpanded ? '▲' : '▼';
+    
+    // Refresh device info when expanding
+    if (state.deviceInfoExpanded) {
+        fetchDeviceInfo();
+    }
 }

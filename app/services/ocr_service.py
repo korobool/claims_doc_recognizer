@@ -13,6 +13,58 @@ _detection_predictor = None
 # CLIP model for image classification
 _clip_model = None
 _clip_processor = None
+_clip_device = None
+
+# Device info storage
+_device_info = {
+    "surya_device": None,
+    "clip_device": None,
+    "cuda_available": False,
+    "cuda_version": None,
+    "gpu_name": None,
+    "mps_available": False
+}
+
+
+def get_device():
+    """Detect and return the best available device for inference."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def get_device_info() -> dict:
+    """Get detailed device information for all components."""
+    global _device_info
+    
+    # Update CUDA info
+    _device_info["cuda_available"] = torch.cuda.is_available()
+    if torch.cuda.is_available():
+        _device_info["cuda_version"] = torch.version.cuda
+        _device_info["gpu_name"] = torch.cuda.get_device_name(0)
+    
+    # Update MPS info (Apple Silicon)
+    _device_info["mps_available"] = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    
+    return _device_info.copy()
+
+
+def print_device_info():
+    """Print device information to stdout."""
+    info = get_device_info()
+    print("\n" + "="*60)
+    print("DEVICE DETECTION RESULTS")
+    print("="*60)
+    print(f"CUDA Available: {info['cuda_available']}")
+    if info['cuda_available']:
+        print(f"CUDA Version: {info['cuda_version']}")
+        print(f"GPU Name: {info['gpu_name']}")
+    print(f"MPS Available (Apple Silicon): {info['mps_available']}")
+    print(f"Surya OCR Device: {info['surya_device'] or 'Not initialized'}")
+    print(f"CLIP Device: {info['clip_device'] or 'Not initialized'}")
+    print("="*60 + "\n")
 
 # Class descriptions for CLIP zero-shot classification
 CLIP_CLASS_DESCRIPTIONS = [
@@ -27,25 +79,38 @@ CLIP_CLASS_NAMES = ["Receipt", "Medication Prescription", "Form", "Contract", "U
 
 
 def get_clip_model():
-    """Lazy initialization of CLIP model."""
-    global _clip_model, _clip_processor
+    """Lazy initialization of CLIP model with GPU support."""
+    global _clip_model, _clip_processor, _clip_device, _device_info
     
     if _clip_model is None:
+        _clip_device = get_device()
+        print(f"[CLIP] Loading model on device: {_clip_device}")
+        
         _clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        _clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        _clip_model = _clip_model.to(_clip_device)
         _clip_model.eval()
+        _clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        
+        _device_info["clip_device"] = str(_clip_device)
+        print(f"[CLIP] Model loaded successfully on {_clip_device}")
     
     return _clip_model, _clip_processor
 
 
 def get_predictors():
     """Lazy initialization of Surya OCR predictors."""
-    global _foundation_predictor, _recognition_predictor, _detection_predictor
+    global _foundation_predictor, _recognition_predictor, _detection_predictor, _device_info
     
     if _recognition_predictor is None:
-        _foundation_predictor = FoundationPredictor()
-        _detection_predictor = DetectionPredictor()
+        device = get_device()
+        print(f"[Surya OCR] Initializing predictors on device: {device}")
+        
+        _foundation_predictor = FoundationPredictor(device=str(device))
+        _detection_predictor = DetectionPredictor(device=str(device))
         _recognition_predictor = RecognitionPredictor(_foundation_predictor)
+        
+        _device_info["surya_device"] = str(device)
+        print(f"[Surya OCR] Predictors initialized successfully on {device}")
     
     return _recognition_predictor, _detection_predictor
 
@@ -277,13 +342,14 @@ def classify_image_with_clip(image: Image.Image) -> dict:
     try:
         model, processor = get_clip_model()
         
-        # Prepare inputs
+        # Prepare inputs and move to device
         inputs = processor(
             text=CLIP_CLASS_DESCRIPTIONS,
             images=image,
             return_tensors="pt",
             padding=True
         )
+        inputs = {k: v.to(_clip_device) for k, v in inputs.items()}
         
         # Get predictions
         with torch.no_grad():

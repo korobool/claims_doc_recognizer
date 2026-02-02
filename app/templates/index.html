@@ -59,6 +59,40 @@
 
         <!-- Right panel: JSON result -->
         <aside class="sidebar right-panel">
+            <div class="device-info-container" id="deviceInfoContainer">
+                <div class="device-info-header" onclick="toggleDeviceInfo()">
+                    <span class="device-info-icon">🖥️</span>
+                    <span class="device-info-title">Device Info</span>
+                    <span class="device-info-status" id="deviceInfoStatus">Loading...</span>
+                    <span class="device-info-toggle" id="deviceInfoToggle">▼</span>
+                </div>
+                <div class="device-info-details" id="deviceInfoDetails" style="display: none;">
+                    <div class="device-info-row">
+                        <span class="device-label">CUDA:</span>
+                        <span class="device-value" id="cudaAvailable">-</span>
+                    </div>
+                    <div class="device-info-row" id="cudaVersionRow" style="display: none;">
+                        <span class="device-label">CUDA Version:</span>
+                        <span class="device-value" id="cudaVersion">-</span>
+                    </div>
+                    <div class="device-info-row" id="gpuNameRow" style="display: none;">
+                        <span class="device-label">GPU:</span>
+                        <span class="device-value" id="gpuName">-</span>
+                    </div>
+                    <div class="device-info-row">
+                        <span class="device-label">MPS (Apple):</span>
+                        <span class="device-value" id="mpsAvailable">-</span>
+                    </div>
+                    <div class="device-info-row">
+                        <span class="device-label">Surya OCR:</span>
+                        <span class="device-value" id="suryaDevice">Not initialized</span>
+                    </div>
+                    <div class="device-info-row">
+                        <span class="device-label">CLIP:</span>
+                        <span class="device-value" id="clipDevice">Not initialized</span>
+                    </div>
+                </div>
+            </div>
             <div class="document-class-container" id="documentClassContainer" style="display: none;">
                 <span class="document-class-label">Document Type:</span>
                 <span class="document-class-value" id="documentClassValue">-</span>

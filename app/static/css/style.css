@@ -534,3 +534,92 @@ body {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* Device Info Styles */
+.device-info-container {
+    background: #1e293b;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.device-info-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.device-info-header:hover {
+    background: #334155;
+}
+
+.device-info-icon {
+    margin-right: 8px;
+}
+
+.device-info-title {
+    font-weight: 600;
+    flex: 1;
+}
+
+.device-info-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-right: 8px;
+}
+
+.device-info-status.status-gpu {
+    background: #22c55e;
+    color: #000;
+}
+
+.device-info-status.status-available {
+    background: #3b82f6;
+    color: #fff;
+}
+
+.device-info-status.status-cpu {
+    background: #64748b;
+    color: #fff;
+}
+
+.device-info-status.status-error {
+    background: #ef4444;
+    color: #fff;
+}
+
+.device-info-toggle {
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+.device-info-details {
+    padding: 0 12px 12px;
+    border-top: 1px solid #334155;
+}
+
+.device-info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+}
+
+.device-label {
+    color: #94a3b8;
+}
+
+.device-value {
+    font-weight: 500;
+}
+
+.device-value.status-gpu {
+    color: #22c55e;
+}
+
+.device-value.status-cpu {
+    color: #94a3b8;
+}

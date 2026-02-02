@@ -5,7 +5,7 @@ from typing import List
 import uuid
 import os
 
-from app.services.ocr_service import recognize_text, recognize_region
+from app.services.ocr_service import recognize_text, recognize_region, get_device_info
 from app.services.image_service import normalize_image
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -142,3 +142,9 @@ async def recognize_region_endpoint(request: RecognizeRegionRequest):
     result = recognize_region(image_bytes, request.bbox)
     
     return result
+
+
+@router.get("/device-info")
+async def device_info():
+    """Get GPU/device information for OCR and CLIP models."""
+    return get_device_info()

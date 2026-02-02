@@ -2,14 +2,27 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
+from contextlib import asynccontextmanager
 import os
 
 from app.routers import api
+from app.services.ocr_service import print_device_info
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown events."""
+    # Startup: print device info
+    print_device_info()
+    yield
+    # Shutdown: cleanup if needed
+
 
 app = FastAPI(
     title="Document Recognition System",
     description="Document OCR and classification system powered by Surya OCR and CLIP",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
