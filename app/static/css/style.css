@@ -701,9 +701,10 @@ body {
 .llm-controls {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid #333;
+    gap: 12px;
+    padding: 12px;
+    background: #1e1e2e;
+    border-radius: 8px;
     margin-bottom: 12px;
 }
 
@@ -730,15 +731,18 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .llm-model-select label {
     font-size: 13px;
     color: #888;
+    flex-shrink: 0;
 }
 
 .llm-model-select select {
     flex: 1;
+    min-width: 120px;
     padding: 6px 10px;
     background: #1a1a2e;
     border: 1px solid #444;
@@ -752,8 +756,16 @@ body {
 }
 
 .btn-small {
-    padding: 6px 10px;
-    font-size: 12px;
+    padding: 6px 12px;
+    font-size: 14px;
+    flex-shrink: 0;
+    min-width: 40px;
+    cursor: pointer;
+}
+
+.btn-small:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
 }
 
 .llm-result-container {
@@ -943,10 +955,9 @@ body {
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    padding: 4px 8px;
+    padding: 6px 10px;
     background: #1a1a2e;
     border-radius: 4px;
-    margin-bottom: 8px;
 }
 
 .accel-icon {
