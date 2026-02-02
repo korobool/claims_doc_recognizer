@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Recognition System</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=14">
+    <link rel="stylesheet" href="/static/css/style.css?v=15">
 </head>
 <body>
     <div class="container">
@@ -36,6 +36,14 @@
                     ✏️ Add BBox
                 </button>
             </div>
+            <!-- Main area tabs -->
+            <div class="main-tabs">
+                <button class="main-tab active" data-tab="viewer" id="viewerTabBtn">📄 Document Viewer</button>
+                <button class="main-tab" data-tab="schemas" id="schemasTabBtn">⚙️ Schema Templates</button>
+            </div>
+            
+            <!-- Document Viewer Tab -->
+            <div class="main-tab-content active" id="viewerTab">
             <div class="image-viewer" id="imageViewer">
                 <div class="placeholder" id="placeholder">
                     <p>Select an image to view</p>
@@ -55,6 +63,61 @@
                 <button class="zoom-btn" id="zoomInBtn" title="Zoom in (Ctrl++)">+</button>
                 <span class="zoom-value" id="zoomValue">100%</span>
             </div>
+            </div><!-- End viewerTab -->
+            
+            <!-- Schema Templates Tab -->
+            <div class="main-tab-content" id="schemasTab" style="display: none;">
+                <div class="schemas-container">
+                    <div class="schemas-sidebar">
+                        <h3>Document Templates</h3>
+                        <div class="schema-list" id="schemaList">
+                            <!-- Schema items loaded dynamically -->
+                        </div>
+                        <button class="btn btn-primary btn-full" id="newSchemaBtn">
+                            ➕ New Template
+                        </button>
+                    </div>
+                    <div class="schema-editor">
+                        <div class="schema-editor-header">
+                            <h3 id="schemaEditorTitle">Select a template</h3>
+                            <div class="schema-editor-actions">
+                                <button class="btn btn-small" id="saveSchemaBtn" disabled>💾 Save</button>
+                                <button class="btn btn-small btn-danger" id="deleteSchemaBtn" disabled>🗑️ Delete</button>
+                            </div>
+                        </div>
+                        
+                        <div class="schema-placeholder" id="schemaPlaceholder">
+                            <p>Select a template from the list or create a new one</p>
+                        </div>
+                        
+                        <div class="schema-edit-form" id="schemaEditForm" style="display: none;">
+                            <!-- LLM Generation Section -->
+                            <div class="schema-llm-section">
+                                <label>Generate with AI:</label>
+                                <div class="schema-llm-input">
+                                    <textarea id="schemaDescription" placeholder="Describe the document type you want to create, e.g., 'A bank statement with account info, transactions list, and balance'"></textarea>
+                                    <div class="schema-llm-controls">
+                                        <select id="schemaLlmModel">
+                                            <option value="">Loading models...</option>
+                                        </select>
+                                        <button class="btn btn-primary" id="generateSchemaBtn">🤖 Generate</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="schema-divider">
+                                <span>or edit manually</span>
+                            </div>
+                            
+                            <!-- YAML Editor -->
+                            <div class="schema-yaml-section">
+                                <label>Schema YAML:</label>
+                                <textarea id="schemaYamlEditor" class="yaml-editor" spellcheck="false"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- End schemasTab -->
         </main>
 
         <!-- Right panel: Results with tabs -->
@@ -204,6 +267,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=14"></script>
+    <script src="/static/js/app.js?v=15"></script>
 </body>
 </html>

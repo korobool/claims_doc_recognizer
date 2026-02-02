@@ -15,6 +15,17 @@ from app.services.llm_service import (
     LLMModel,
     OllamaClient
 )
+from app.config.document_schemas import (
+    get_all_schemas,
+    get_schema,
+    save_schema,
+    reload_schemas,
+    list_schema_files,
+    DocumentSchema,
+    FieldSchema,
+    FieldType,
+    SCHEMAS_DIR
+)
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -357,4 +368,254 @@ async def llm_denoise_text(request: LLMProcessRequest):
     return {
         "original_text": request.text,
         "denoised_text": denoised
+    }
+
+
+# =============================================================================
+# Schema Management Endpoints
+# =============================================================================
+
+class SchemaFieldRequest(BaseModel):
+    name: str
+    type: str = "text"
+    description: str
+    required: bool = False
+
+
+class SchemaRequest(BaseModel):
+    type_id: str
+    display_name: str
+    clip_prompts: List[str] = []
+    keywords: List[str] = []
+    llm_context: str = ""
+    fields: List[SchemaFieldRequest] = []
+
+
+class GenerateSchemaRequest(BaseModel):
+    description: str
+    model: Optional[str] = None
+
+
+@router.get("/schemas")
+async def list_schemas():
+    """List all available document schemas."""
+    schemas = get_all_schemas()
+    result = []
+    for type_id, schema in schemas.items():
+        result.append({
+            "type_id": schema.type_id,
+            "display_name": schema.display_name,
+            "field_count": len(schema.fields),
+            "keywords": schema.keywords[:5],  # First 5 keywords
+            "source_file": schema.source_file
+        })
+    return {"schemas": result}
+
+
+@router.get("/schemas/{type_id}")
+async def get_schema_detail(type_id: str):
+    """Get detailed schema by type ID."""
+    schema = get_schema(type_id)
+    if schema.type_id == "unknown" and type_id != "unknown":
+        raise HTTPException(status_code=404, detail=f"Schema '{type_id}' not found")
+    
+    return {
+        "type_id": schema.type_id,
+        "display_name": schema.display_name,
+        "clip_prompts": schema.clip_prompts,
+        "keywords": schema.keywords,
+        "llm_context": schema.llm_context,
+        "fields": [
+            {
+                "name": f.name,
+                "type": f.field_type.value,
+                "description": f.description,
+                "required": f.required
+            }
+            for f in schema.fields
+        ],
+        "source_file": schema.source_file
+    }
+
+
+@router.get("/schemas/{type_id}/yaml")
+async def get_schema_yaml(type_id: str):
+    """Get raw YAML content of a schema file."""
+    import yaml
+    schema = get_schema(type_id)
+    if schema.type_id == "unknown" and type_id != "unknown":
+        raise HTTPException(status_code=404, detail=f"Schema '{type_id}' not found")
+    
+    if schema.source_file and os.path.exists(schema.source_file):
+        with open(schema.source_file, 'r') as f:
+            return {"yaml": f.read(), "filename": os.path.basename(schema.source_file)}
+    
+    # Generate YAML from schema object
+    yaml_content = yaml.dump(schema.to_dict(), default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return {"yaml": yaml_content, "filename": f"{type_id}.yaml"}
+
+
+@router.put("/schemas/{type_id}")
+async def update_schema(type_id: str, request: SchemaRequest):
+    """Update or create a schema."""
+    import yaml
+    
+    # Build schema dict
+    schema_dict = {
+        "type_id": request.type_id,
+        "display_name": request.display_name,
+        "clip_prompts": request.clip_prompts,
+        "keywords": request.keywords,
+        "llm_context": request.llm_context,
+        "fields": [
+            {
+                "name": f.name,
+                "type": f.type,
+                "description": f.description,
+                "required": f.required
+            }
+            for f in request.fields
+        ]
+    }
+    
+    # Save to YAML file
+    filepath = SCHEMAS_DIR / f"{request.type_id}.yaml"
+    with open(filepath, 'w', encoding='utf-8') as f:
+        yaml.dump(schema_dict, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    
+    # Reload schemas
+    reload_schemas()
+    
+    print(f"[Schema] Saved schema: {request.type_id} to {filepath}")
+    
+    return {"status": "saved", "type_id": request.type_id, "filepath": str(filepath)}
+
+
+@router.put("/schemas/{type_id}/yaml")
+async def update_schema_yaml(type_id: str, yaml_content: str):
+    """Update a schema from raw YAML content."""
+    import yaml
+    
+    try:
+        # Validate YAML
+        data = yaml.safe_load(yaml_content)
+        if not data or not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Invalid YAML content")
+        
+        # Use type_id from YAML or URL
+        actual_type_id = data.get("type_id", type_id)
+        
+        # Save to file
+        filepath = SCHEMAS_DIR / f"{actual_type_id}.yaml"
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(yaml_content)
+        
+        # Reload schemas
+        reload_schemas()
+        
+        print(f"[Schema] Saved YAML schema: {actual_type_id} to {filepath}")
+        
+        return {"status": "saved", "type_id": actual_type_id, "filepath": str(filepath)}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
+
+
+@router.delete("/schemas/{type_id}")
+async def delete_schema(type_id: str):
+    """Delete a schema file."""
+    if type_id == "unknown":
+        raise HTTPException(status_code=400, detail="Cannot delete the 'unknown' fallback schema")
+    
+    filepath = SCHEMAS_DIR / f"{type_id}.yaml"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail=f"Schema file not found: {type_id}.yaml")
+    
+    os.remove(filepath)
+    reload_schemas()
+    
+    print(f"[Schema] Deleted schema: {type_id}")
+    
+    return {"status": "deleted", "type_id": type_id}
+
+
+@router.post("/schemas/generate")
+async def generate_schema_with_llm(request: GenerateSchemaRequest):
+    """Generate a new schema using LLM based on user description."""
+    client = get_ollama_client()
+    
+    if not await client.is_available():
+        raise HTTPException(status_code=503, detail="Ollama service not available")
+    
+    model = LLMModel.from_string(request.model) if request.model else None
+    
+    prompt = f"""Generate a document schema YAML for the following document type:
+
+USER DESCRIPTION:
+{request.description}
+
+Generate a YAML schema with:
+1. type_id: a short lowercase identifier (e.g., "invoice", "medical_report")
+2. display_name: human-readable name
+3. clip_prompts: 2-3 prompts for image classification
+4. keywords: 5-10 keywords that appear in this document type
+5. llm_context: brief instructions for extracting data from this document type, including common OCR errors to fix
+6. fields: list of fields to extract, each with name, type (text/date/currency/list/number), description, required (true/false)
+
+For list-type fields, describe what each item should contain in the description.
+
+Return ONLY valid YAML, no explanations:"""
+
+    print(f"[Schema] Generating schema with LLM for: {request.description[:50]}...")
+    
+    result = await client.generate(
+        prompt=prompt,
+        model=model,
+        temperature=0.3,
+        max_tokens=2048
+    )
+    
+    if not result:
+        raise HTTPException(status_code=500, detail="LLM generation failed")
+    
+    # Clean up the result - extract YAML if wrapped in code blocks
+    yaml_content = result.strip()
+    if yaml_content.startswith("```"):
+        lines = yaml_content.split("\n")
+        yaml_lines = []
+        in_yaml = False
+        for line in lines:
+            if line.startswith("```") and not in_yaml:
+                in_yaml = True
+                continue
+            elif line.startswith("```") and in_yaml:
+                break
+            elif in_yaml:
+                yaml_lines.append(line)
+        yaml_content = "\n".join(yaml_lines)
+    
+    # Validate YAML
+    import yaml
+    try:
+        data = yaml.safe_load(yaml_content)
+        if not data or not isinstance(data, dict):
+            raise HTTPException(status_code=500, detail="LLM generated invalid YAML structure")
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=500, detail=f"LLM generated invalid YAML: {str(e)}")
+    
+    return {
+        "yaml": yaml_content,
+        "parsed": data,
+        "type_id": data.get("type_id", "new_schema"),
+        "display_name": data.get("display_name", "New Schema")
+    }
+
+
+@router.post("/schemas/reload")
+async def reload_all_schemas():
+    """Force reload all schemas from YAML files."""
+    schemas = reload_schemas()
+    return {
+        "status": "reloaded",
+        "count": len(schemas),
+        "schemas": list(schemas.keys())
     }

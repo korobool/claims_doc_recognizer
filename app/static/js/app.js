@@ -16,7 +16,11 @@ const state = {
         models: [],
         selectedModel: null
     },
-    llmResult: null
+    llmResult: null,
+    // Schema management state
+    schemas: [],
+    selectedSchemaId: null,
+    schemaYamlDirty: false
 };
 
 // DOM elements
@@ -124,6 +128,9 @@ function init() {
     
     // Check LLM status
     checkLlmStatus();
+    
+    // Initialize schema management
+    initSchemaManagement();
 }
 
 // === File upload ===
@@ -1352,5 +1359,351 @@ function displayLlmResult(result) {
     const docTypeEl = document.getElementById('llmDocType');
     if (docTypeEl) {
         docTypeEl.textContent = result.document_type_name || result.document_type || 'Unknown';
+    }
+}
+
+// =============================================================================
+// SCHEMA MANAGEMENT
+// =============================================================================
+
+function initSchemaManagement() {
+    // Main tab switching
+    const viewerTabBtn = document.getElementById('viewerTabBtn');
+    const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const viewerTab = document.getElementById('viewerTab');
+    const schemasTab = document.getElementById('schemasTab');
+    
+    if (viewerTabBtn && schemasTabBtn) {
+        viewerTabBtn.addEventListener('click', () => switchMainTab('viewer'));
+        schemasTabBtn.addEventListener('click', () => switchMainTab('schemas'));
+    }
+    
+    // Schema management buttons
+    const newSchemaBtn = document.getElementById('newSchemaBtn');
+    const saveSchemaBtn = document.getElementById('saveSchemaBtn');
+    const deleteSchemaBtn = document.getElementById('deleteSchemaBtn');
+    const generateSchemaBtn = document.getElementById('generateSchemaBtn');
+    
+    if (newSchemaBtn) newSchemaBtn.addEventListener('click', createNewSchema);
+    if (saveSchemaBtn) saveSchemaBtn.addEventListener('click', saveCurrentSchema);
+    if (deleteSchemaBtn) deleteSchemaBtn.addEventListener('click', deleteCurrentSchema);
+    if (generateSchemaBtn) generateSchemaBtn.addEventListener('click', generateSchemaWithLLM);
+    
+    // YAML editor change tracking
+    const yamlEditor = document.getElementById('schemaYamlEditor');
+    if (yamlEditor) {
+        yamlEditor.addEventListener('input', () => {
+            state.schemaYamlDirty = true;
+            document.getElementById('saveSchemaBtn').disabled = false;
+        });
+    }
+}
+
+function switchMainTab(tabName) {
+    const viewerTabBtn = document.getElementById('viewerTabBtn');
+    const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const viewerTab = document.getElementById('viewerTab');
+    const schemasTab = document.getElementById('schemasTab');
+    
+    if (tabName === 'viewer') {
+        viewerTabBtn.classList.add('active');
+        schemasTabBtn.classList.remove('active');
+        viewerTab.style.display = 'flex';
+        viewerTab.classList.add('active');
+        schemasTab.style.display = 'none';
+        schemasTab.classList.remove('active');
+    } else if (tabName === 'schemas') {
+        viewerTabBtn.classList.remove('active');
+        schemasTabBtn.classList.add('active');
+        viewerTab.style.display = 'none';
+        viewerTab.classList.remove('active');
+        schemasTab.style.display = 'flex';
+        schemasTab.classList.add('active');
+        
+        // Load schemas when switching to tab
+        loadSchemaList();
+        loadSchemaLlmModels();
+    }
+}
+
+async function loadSchemaList() {
+    try {
+        const response = await fetch('/api/schemas');
+        if (!response.ok) throw new Error('Failed to load schemas');
+        
+        const data = await response.json();
+        state.schemas = data.schemas;
+        
+        renderSchemaList();
+    } catch (error) {
+        console.error('Failed to load schemas:', error);
+    }
+}
+
+function renderSchemaList() {
+    const schemaList = document.getElementById('schemaList');
+    if (!schemaList) return;
+    
+    schemaList.innerHTML = '';
+    
+    state.schemas.forEach(schema => {
+        const item = document.createElement('div');
+        item.className = 'schema-item' + (schema.type_id === state.selectedSchemaId ? ' active' : '');
+        item.innerHTML = `
+            <div class="schema-item-name">${schema.display_name}</div>
+            <div class="schema-item-meta">${schema.field_count} fields • ${schema.type_id}</div>
+        `;
+        item.addEventListener('click', () => selectSchema(schema.type_id));
+        schemaList.appendChild(item);
+    });
+}
+
+async function selectSchema(typeId) {
+    if (state.schemaYamlDirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) {
+            return;
+        }
+    }
+    
+    state.selectedSchemaId = typeId;
+    state.schemaYamlDirty = false;
+    
+    // Update list selection
+    renderSchemaList();
+    
+    // Load schema YAML
+    try {
+        const response = await fetch(`/api/schemas/${typeId}/yaml`);
+        if (!response.ok) throw new Error('Failed to load schema');
+        
+        const data = await response.json();
+        
+        // Show editor
+        document.getElementById('schemaPlaceholder').style.display = 'none';
+        document.getElementById('schemaEditForm').style.display = 'flex';
+        document.getElementById('schemaEditorTitle').textContent = data.filename;
+        document.getElementById('schemaYamlEditor').value = data.yaml;
+        document.getElementById('saveSchemaBtn').disabled = true;
+        document.getElementById('deleteSchemaBtn').disabled = typeId === 'unknown';
+        
+    } catch (error) {
+        console.error('Failed to load schema:', error);
+        alert('Failed to load schema: ' + error.message);
+    }
+}
+
+function createNewSchema() {
+    if (state.schemaYamlDirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) {
+            return;
+        }
+    }
+    
+    state.selectedSchemaId = null;
+    state.schemaYamlDirty = false;
+    
+    // Clear list selection
+    renderSchemaList();
+    
+    // Show editor with template
+    const template = `# New Document Schema
+type_id: new_document
+display_name: New Document Type
+
+clip_prompts:
+  - "a document"
+
+keywords:
+  - document
+
+llm_context: |
+  This is a NEW DOCUMENT TYPE. Describe what to extract here.
+
+fields:
+  - name: example_field
+    type: text
+    description: "Example field description"
+    required: true
+`;
+    
+    document.getElementById('schemaPlaceholder').style.display = 'none';
+    document.getElementById('schemaEditForm').style.display = 'flex';
+    document.getElementById('schemaEditorTitle').textContent = 'New Template';
+    document.getElementById('schemaYamlEditor').value = template;
+    document.getElementById('saveSchemaBtn').disabled = false;
+    document.getElementById('deleteSchemaBtn').disabled = true;
+}
+
+async function saveCurrentSchema() {
+    const yamlContent = document.getElementById('schemaYamlEditor').value;
+    
+    if (!yamlContent.trim()) {
+        alert('Schema content is empty');
+        return;
+    }
+    
+    // Extract type_id from YAML
+    const typeIdMatch = yamlContent.match(/type_id:\s*(\S+)/);
+    const typeId = typeIdMatch ? typeIdMatch[1] : 'new_schema';
+    
+    try {
+        const response = await fetch(`/api/schemas/${typeId}/yaml`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/plain' },
+            body: yamlContent
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to save schema');
+        }
+        
+        const data = await response.json();
+        console.log('Schema saved:', data);
+        
+        state.schemaYamlDirty = false;
+        state.selectedSchemaId = data.type_id;
+        document.getElementById('saveSchemaBtn').disabled = true;
+        
+        // Reload schema list
+        await loadSchemaList();
+        
+        alert('Schema saved successfully!');
+        
+    } catch (error) {
+        console.error('Failed to save schema:', error);
+        alert('Failed to save schema: ' + error.message);
+    }
+}
+
+async function deleteCurrentSchema() {
+    if (!state.selectedSchemaId || state.selectedSchemaId === 'unknown') {
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete the "${state.selectedSchemaId}" schema?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/schemas/${state.selectedSchemaId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete schema');
+        }
+        
+        console.log('Schema deleted:', state.selectedSchemaId);
+        
+        state.selectedSchemaId = null;
+        state.schemaYamlDirty = false;
+        
+        // Reset editor
+        document.getElementById('schemaPlaceholder').style.display = 'flex';
+        document.getElementById('schemaEditForm').style.display = 'none';
+        document.getElementById('schemaEditorTitle').textContent = 'Select a template';
+        
+        // Reload schema list
+        await loadSchemaList();
+        
+    } catch (error) {
+        console.error('Failed to delete schema:', error);
+        alert('Failed to delete schema: ' + error.message);
+    }
+}
+
+async function loadSchemaLlmModels() {
+    const modelSelect = document.getElementById('schemaLlmModel');
+    if (!modelSelect) return;
+    
+    try {
+        const response = await fetch('/api/llm/status');
+        if (!response.ok) throw new Error('Failed to get LLM status');
+        
+        const data = await response.json();
+        
+        modelSelect.innerHTML = '';
+        
+        if (!data.ollama_available) {
+            modelSelect.innerHTML = '<option value="">Ollama offline</option>';
+            document.getElementById('generateSchemaBtn').disabled = true;
+            return;
+        }
+        
+        data.models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = model.name + (model.available ? '' : ' (not pulled)');
+            option.disabled = !model.available;
+            modelSelect.appendChild(option);
+        });
+        
+        // Select first available model
+        const firstAvailable = data.models.find(m => m.available);
+        if (firstAvailable) {
+            modelSelect.value = firstAvailable.id;
+            document.getElementById('generateSchemaBtn').disabled = false;
+        } else {
+            document.getElementById('generateSchemaBtn').disabled = true;
+        }
+        
+    } catch (error) {
+        console.error('Failed to load LLM models:', error);
+        modelSelect.innerHTML = '<option value="">Error loading models</option>';
+    }
+}
+
+async function generateSchemaWithLLM() {
+    const description = document.getElementById('schemaDescription').value.trim();
+    if (!description) {
+        alert('Please describe the document type you want to create');
+        return;
+    }
+    
+    const modelId = document.getElementById('schemaLlmModel').value;
+    const generateBtn = document.getElementById('generateSchemaBtn');
+    
+    generateBtn.disabled = true;
+    generateBtn.textContent = '⏳ Generating...';
+    
+    try {
+        const response = await fetch('/api/schemas/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                description: description,
+                model: modelId || null
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Generation failed');
+        }
+        
+        const data = await response.json();
+        
+        // Put generated YAML in editor
+        document.getElementById('schemaYamlEditor').value = data.yaml;
+        document.getElementById('schemaEditorTitle').textContent = data.display_name + ' (generated)';
+        state.schemaYamlDirty = true;
+        state.selectedSchemaId = null;
+        document.getElementById('saveSchemaBtn').disabled = false;
+        document.getElementById('deleteSchemaBtn').disabled = true;
+        
+        // Show editor if hidden
+        document.getElementById('schemaPlaceholder').style.display = 'none';
+        document.getElementById('schemaEditForm').style.display = 'flex';
+        
+        console.log('Schema generated:', data.type_id);
+        
+    } catch (error) {
+        console.error('Failed to generate schema:', error);
+        alert('Failed to generate schema: ' + error.message);
+    } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = '🤖 Generate';
     }
 }
