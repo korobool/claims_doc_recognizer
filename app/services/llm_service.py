@@ -541,17 +541,19 @@ class LLMPostProcessor:
     # System prompt for vision-enabled models (concise, focused on image)
     VISION_SYSTEM_PROMPT = """You are a medical document processor with vision capabilities.
 
-IMPORTANT: You receive TWO representations of the SAME document:
-1. The document IMAGE (what you can see)
-2. OCR-extracted TEXT (may contain errors)
+You receive TWO sources for the SAME document:
+1. Document IMAGE - you can see it directly
+2. OCR TEXT - machine-extracted text (may have errors OR may catch things hard to see)
 
-These are NOT separate documents - they represent the SAME content. Your task is to:
-- Use the image as the ground truth for verification
-- Use OCR text as a helpful starting point (but it may have errors)
-- Produce ONE corrected result by merging both sources intelligently
-- Do NOT duplicate items that appear in both representations
+CRITICAL EXTRACTION RULES:
+- Include ALL items from BOTH sources (union, not intersection)
+- If OCR found something, verify it in the image and include it (with corrections if needed)
+- If you see something in the image that OCR missed, include it too
+- OCR might catch faint/small text that's hard to see - don't ignore it
+- Your job is to MAXIMIZE recall - capture everything, miss nothing
+- Only exclude items if they are clearly OCR artifacts (garbage characters)
 
-Medical terms, drug names, and dosages must be 100% accurate.
+Medical terms, drug names, and dosages must be accurate.
 Always respond with valid JSON only."""
 
     # System prompt for text-only models (more detailed guidance)
@@ -611,19 +613,22 @@ Always respond with valid JSON only."""
 
 EXTRACT THESE FIELDS: {field_list}
 
-=== OCR TEXT (noisy, may contain errors) ===
+=== OCR-EXTRACTED TEXT ===
 {text}
 === END OCR TEXT ===
 
-INSTRUCTIONS:
-1. The IMAGE and OCR TEXT above represent the SAME document
-2. Use the image as ground truth - OCR text is just a noisy reference
-3. Fix OCR errors by comparing text against what you see in the image
-4. Extract fields ONCE - do not duplicate items from both sources
-5. For medications: verify drug names and dosages against the image
+TASK: Extract ALL information by combining BOTH the image AND the OCR text above.
+
+RULES:
+1. INCLUDE everything the OCR found - correct spelling errors but keep all items
+2. ALSO include anything you see in the image that OCR might have missed
+3. For each medication/item in OCR text: verify against image, fix errors, but KEEP IT
+4. Do NOT drop items just because they're hard to read - OCR often catches faint text
+5. Merge duplicates: if same item appears twice, include it once with best spelling
+6. Goal: MAXIMIZE extraction - capture ALL medications, names, dates, etc.
 
 Return JSON only:
-{{"corrected_text": "cleaned text from image", "extracted_fields": {example_json}}}"""
+{{"corrected_text": "all text from document with corrections", "extracted_fields": {example_json}}}"""
     
     def _build_text_prompt(self, text: str, schema: DocumentSchema) -> str:
         """Build a detailed prompt for text-only models."""
@@ -1047,19 +1052,22 @@ class GeminiPostProcessor:
 
 EXTRACT THESE FIELDS: {field_list}
 
-=== OCR TEXT (noisy, may contain errors) ===
+=== OCR-EXTRACTED TEXT ===
 {text}
 === END OCR TEXT ===
 
-INSTRUCTIONS:
-1. The IMAGE and OCR TEXT above represent the SAME document
-2. Use the image as ground truth - OCR text is just a noisy reference
-3. Fix OCR errors by comparing text against what you see in the image
-4. Extract fields ONCE - do not duplicate items from both sources
-5. For medications: verify drug names and dosages against the image
+TASK: Extract ALL information by combining BOTH the image AND the OCR text above.
+
+RULES:
+1. INCLUDE everything the OCR found - correct spelling errors but keep all items
+2. ALSO include anything you see in the image that OCR might have missed
+3. For each medication/item in OCR text: verify against image, fix errors, but KEEP IT
+4. Do NOT drop items just because they're hard to read - OCR often catches faint text
+5. Merge duplicates: if same item appears twice, include it once with best spelling
+6. Goal: MAXIMIZE extraction - capture ALL medications, names, dates, etc.
 
 Return JSON only:
-{{"corrected_text": "cleaned text from image", "extracted_fields": {example_json}}}"""
+{{"corrected_text": "all text from document with corrections", "extracted_fields": {example_json}}}"""
         else:
             # More detailed prompt for text-only
             field_descriptions = []
