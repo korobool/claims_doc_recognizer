@@ -26,12 +26,16 @@ A local web application for document OCR (Optical Character Recognition) with im
 - **Interactive Editing**: Overlay for editing recognized text
 - **Export**: Save results to JSON
 
-### LLM Post-Processing (NEW)
+### LLM Post-Processing with Multimodal Vision
+- **Vision-Enabled LLMs**: Multimodal models (Gemma 3, LLaVA, Llama Vision) can see the document image directly
+- **Combined Processing**: Image + OCR text processed together for superior accuracy
 - **Local LLM Integration**: Ollama support for privacy-preserving inference
-- **Multiple Models**: Devstral 24B, Qwen 2.5, Meditron, MedGemma, and custom models
-- **Gemini Support**: Optional Google Gemini 2.5 Pro API integration
+- **Multiple Models**: 
+  - **Vision Models**: Gemma 3 27B/12B (default), LLaVA 34B/13B, Llama 3.2 Vision, MiniCPM-V
+  - **Text Models**: Devstral 24B, Qwen 2.5, Meditron, MedGemma
+- **Gemini Support**: Optional Google Gemini 2.5 Pro API with full vision capabilities
 - **Structured Extraction**: Context-aware field extraction based on document type
-- **OCR Error Correction**: LLM-powered text cleanup and normalization
+- **Medical Domain Optimized**: Prompts tuned for medical terminology and drug names
 - **Schema Templates**: YAML-based document schemas for customizable extraction
 
 ### Document Schema System (NEW)
@@ -171,8 +175,11 @@ Open in browser: http://localhost:8000
 ### LLM Enhancement Workflow
 1. Complete OCR recognition (steps 1-4 above)
 2. Go to **Settings** tab → Select an LLM model (pull if needed)
+   - **Vision models** (recommended): Gemma 3 27B, LLaVA - see the document image for best accuracy
+   - **Text models**: Devstral, Qwen - process OCR text only
 3. Go to **LLM Results** tab → Click "Process with LLM"
 4. View extracted fields and corrected text
+   - Vision models show `[Vision]` indicator when image was used
 
 ### Schema Management
 1. Go to **Schema Templates** tab
@@ -223,8 +230,8 @@ document_recognition_local/
 ### LLM Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/llm/status` | GET | LLM service status and available models |
-| `/api/llm/process` | POST | Process text with LLM for structured extraction |
+| `/api/llm/status` | GET | LLM service status, models, and vision capabilities |
+| `/api/llm/process` | POST | Process with LLM (supports image_id for vision models) |
 | `/api/llm/pull/{model_id}` | POST | Pull/download Ollama model (streaming) |
 
 ### Schema Endpoints
@@ -256,12 +263,18 @@ document_recognition_local/
 
 ### LLM Model Requirements
 
-| Model | VRAM/RAM | Notes |
-|-------|----------|-------|
-| Devstral 24B | ~16GB | Default model, best quality |
-| Qwen 2.5 7B | ~6GB | Good balance of speed/quality |
-| Meditron 7B | ~6GB | Medical domain specialized |
-| Gemini 2.5 Pro | Cloud | Requires API key |
+| Model | VRAM/RAM | Vision | Notes |
+|-------|----------|--------|-------|
+| **Gemma 3 27B** | ~18GB | Yes | **Default** - best vision + quality |
+| Gemma 3 12B | ~10GB | Yes | Smaller vision model |
+| LLaVA 34B | ~22GB | Yes | High accuracy multimodal |
+| LLaVA 13B | ~10GB | Yes | Balanced multimodal |
+| Llama 3.2 Vision | ~8GB | Yes | Meta's vision model |
+| MiniCPM-V 8B | ~6GB | Yes | Efficient vision model |
+| Devstral 24B | ~16GB | No | Text-only, high quality |
+| Qwen 2.5 7B | ~6GB | No | Good balance of speed/quality |
+| Meditron 7B | ~6GB | No | Medical domain specialized |
+| Gemini 2.5 Pro | Cloud | Yes | Requires API key, full vision |
 
 ## Document Schemas
 

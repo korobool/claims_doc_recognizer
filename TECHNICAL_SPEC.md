@@ -9,7 +9,7 @@ A local web application for document OCR (Optical Character Recognition) with im
 - **OCR Engine**: Surya OCR (VikParuchuri/surya) - transformer-based multilingual OCR
 - **Image Processing**: OpenCV, SciPy, NumPy
 - **Document Classification**: OpenAI CLIP (clip-vit-base-patch32) + keyword-based hybrid
-- **LLM Post-Processing**: Ollama (local) + Google Gemini (optional cloud)
+- **LLM Post-Processing**: Ollama (local) + Google Gemini (cloud) with multimodal vision support
 - **Schema System**: YAML-based document schemas for structured extraction
 - **Frontend**: Vanilla JavaScript, HTML5, CSS3 (served via Jinja2 templates)
 
@@ -36,8 +36,8 @@ A local web application for document OCR (Optical Character Recognition) with im
 │  POST /api/recognize       - Full OCR + classification              │
 │  POST /api/recognize-region - OCR on selected region                │
 │  GET  /api/image/{id}      - Retrieve image                         │
-│  GET  /api/llm/status      - LLM service status and models          │
-│  POST /api/llm/process     - LLM structured extraction              │
+│  GET  /api/llm/status      - LLM service status, models, vision caps│
+│  POST /api/llm/process     - LLM extraction (image_id for vision)   │
 │  POST /api/llm/pull/{id}   - Pull Ollama model                      │
 │  GET  /api/schemas         - List document schemas                  │
 │  POST /api/schemas/generate - Generate schema with LLM              │
@@ -57,9 +57,10 @@ A local web application for document OCR (Optical Character Recognition) with im
 │    - classify_document_hybrid() - CLIP + keyword classification     │
 │                                                                     │
 │  llm_service.py:                                                    │
-│    - OllamaClient - Local LLM via Ollama                            │
-│    - GeminiClient - Google Gemini API                               │
-│    - LLMPostProcessor - Schema-based extraction                     │
+│    - OllamaClient - Local LLM via Ollama (with vision support)      │
+│    - GeminiClient - Google Gemini API (with vision support)         │
+│    - LLMPostProcessor - Schema-based extraction (multimodal)        │
+│    - Vision models: Gemma 3, LLaVA, Llama Vision, MiniCPM-V         │
 │                                                                     │
 │  document_schemas.py:                                               │
 │    - get_schemas() - Load YAML schemas                              │

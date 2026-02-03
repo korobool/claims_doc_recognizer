@@ -82,12 +82,13 @@ A **local, GPU-accelerated document recognition system** that:
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      LLM BACKENDS (Optional)                             │
+│                      LLM BACKENDS (with Vision Support)                  │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────┐   │
 │  │  Ollama (Local)             │  │  Google Gemini (Cloud)          │   │
-│  │  - Devstral 24B             │  │  - Gemini 2.5 Pro               │   │
-│  │  - Qwen 2.5, Meditron       │  │  - API Key Required             │   │
-│  │  - Custom pulled models     │  │                                 │   │
+│  │  Vision: Gemma 3, LLaVA,    │  │  - Gemini 2.5 Pro [Vision]      │   │
+│  │    Llama Vision, MiniCPM-V  │  │  - API Key Required             │   │
+│  │  Text: Devstral, Qwen       │  │  - Full multimodal support      │   │
+│  │  Medical: Meditron, MedGemma│  │                                 │   │
 │  └─────────────────────────────┘  └─────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -406,7 +407,8 @@ User uploads image
   },
   "document_type": "receipt",
   "document_type_name": "Receipt / Invoice",
-  "model": "Devstral 24B"
+  "model": "Gemma 3 (27B) [Vision]",
+  "vision_used": true
 }
 ```
 
@@ -671,11 +673,12 @@ The Document Recognition System provides a complete, privacy-preserving solution
 1. **Local-first**: All processing on-device, no cloud dependency
 2. **Multi-platform GPU acceleration**: Mac, NVIDIA, DGX Spark
 3. **State-of-the-art accuracy**: Surya OCR + CLIP classification
-4. **LLM-powered extraction**: Structured data extraction with local or cloud LLMs
-5. **Schema-based processing**: YAML document schemas for customizable extraction
-6. **Human-in-the-loop**: Interactive correction of OCR results
-7. **Zero-shot classification**: Add new document types without retraining
-8. **Production-ready**: FastAPI backend, modern frontend
+4. **Multimodal Vision LLMs**: Image + text processed together for superior extraction
+5. **LLM-powered extraction**: Structured data extraction with local or cloud LLMs
+6. **Schema-based processing**: YAML document schemas for customizable extraction
+7. **Human-in-the-loop**: Interactive correction of OCR results
+8. **Zero-shot classification**: Add new document types without retraining
+9. **Production-ready**: FastAPI backend, modern frontend
 
 ### Technology Stack Summary
 
@@ -687,8 +690,8 @@ The Document Recognition System provides a complete, privacy-preserving solution
 │ Backend     │ Python 3.10+, FastAPI, Uvicorn                    │
 │ OCR         │ Surya OCR (Vision Transformer)                    │
 │ Classify    │ OpenAI CLIP (ViT-B/32)                            │
-│ LLM Local   │ Ollama (Devstral, Qwen, Meditron, etc.)           │
-│ LLM Cloud   │ Google Gemini 2.5 Pro (optional)                  │
+│ LLM Local   │ Ollama - Vision: Gemma 3, LLaVA; Text: Devstral   │
+│ LLM Cloud   │ Google Gemini 2.5 Pro with Vision (optional)      │
 │ Image Proc  │ OpenCV, Pillow                                    │
 │ ML Runtime  │ PyTorch 2.0+                                      │
 │ Acceleration│ CUDA (NVIDIA), MPS (Apple), CPU                   │
