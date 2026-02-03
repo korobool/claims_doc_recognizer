@@ -1284,6 +1284,8 @@ async function processWithLlm() {
             use_vision: true  // Enable vision processing when available
         };
         
+        console.log('[LLM] Sending request with image_id:', state.selectedImageId, 'body:', requestBody);
+        
         const response = await fetch('/api/llm/process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1781,6 +1783,8 @@ async function processWithLlmMain() {
             use_vision: true  // Enable vision processing when available
         };
         
+        console.log('[LLM Main] Sending request with image_id:', state.selectedImageId, 'body:', requestBody);
+        
         const response = await fetch('/api/llm/process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1794,6 +1798,9 @@ async function processWithLlmMain() {
         
         const result = await response.json();
         state.llmResult = result;
+        
+        // Log if vision was used
+        console.log('[LLM Main] Result - vision_used:', result.vision_used);
         
         displayLlmResultMain(result);
         

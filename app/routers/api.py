@@ -454,8 +454,21 @@ async def llm_process_text(request: LLMProcessRequest):
     # Load image bytes if image_id is provided
     image_bytes = None
     if request.image_id and request.use_vision:
+        image_path = None
+        
+        # First try the in-memory store
         if request.image_id in images_store:
             image_path = images_store[request.image_id]["path"]
+        else:
+            # Fallback: check if file exists directly on disk (handles server restarts)
+            fallback_path = os.path.join(UPLOAD_DIR, f"{request.image_id}.png")
+            if os.path.exists(fallback_path):
+                image_path = fallback_path
+                # Re-add to store for future requests
+                images_store[request.image_id] = {"path": fallback_path, "filename": f"{request.image_id}.png"}
+                print(f"[LLM] Recovered image from disk: {request.image_id}")
+        
+        if image_path:
             try:
                 with open(image_path, "rb") as f:
                     image_bytes = f.read()
@@ -463,7 +476,7 @@ async def llm_process_text(request: LLMProcessRequest):
             except Exception as e:
                 print(f"[LLM] Warning: Could not load image: {e}")
         else:
-            print(f"[LLM] Warning: Image ID {request.image_id} not found in store")
+            print(f"[LLM] Warning: Image ID {request.image_id} not found in store or on disk")
     
     # Check if Gemini is requested
     if request.model and request.model.lower().startswith("gemini"):
