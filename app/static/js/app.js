@@ -25,8 +25,34 @@ const state = {
     // Timing state
     currentTimer: null,
     llmStartTime: null,
-    llmTokenCount: 0
+    llmTokenCount: 0,
+    // Per-image cache: stores OCR results, LLM results, logs, etc.
+    imageCache: {}
 };
+
+// Structure for per-image cached data
+function createImageCacheEntry() {
+    return {
+        ocrResult: null,
+        llmResult: null,
+        activityLogs: [],
+        llmRawOutput: '',
+        llmStats: { tokens: 0, timeMs: 0 },
+        llmMeta: { mode: null, model: null },
+        ocrTiming: null,
+        isNormalized: false,
+        isRecognized: false,
+        isLlmProcessed: false
+    };
+}
+
+// Get or create cache entry for an image
+function getImageCache(imageId) {
+    if (!state.imageCache[imageId]) {
+        state.imageCache[imageId] = createImageCacheEntry();
+    }
+    return state.imageCache[imageId];
+}
 
 // DOM elements
 const elements = {
@@ -151,40 +177,40 @@ function init() {
 }
 
 // =============================================================================
-// RIGHT PANEL TABS
+// RIGHT PANEL SECTIONS (Collapsible)
 // =============================================================================
 
 function initRightPanelTabs() {
-    const tabs = document.querySelectorAll('.rp-tab');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const tabId = tab.dataset.rpTab;
-            switchRightPanelTab(tabId);
-        });
-    });
+    // Legacy - no longer using tabs, using collapsible sections
 }
 
-function switchRightPanelTab(tabId) {
-    // Update tab buttons
-    document.querySelectorAll('.rp-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.rpTab === tabId);
-    });
-    
-    // Update tab content
-    document.querySelectorAll('.rp-tab-content').forEach(content => {
-        content.classList.remove('active');
-    });
-    
-    // Map tab IDs to content IDs
-    const tabMapping = {
-        'ocr': 'rpOcrTab',
-        'activity': 'rpActivityTab',
-        'llm-raw': 'rpLlmRawTab'
+function toggleSection(sectionName) {
+    const sectionMap = {
+        'activity': 'activitySection',
+        'llmRaw': 'llmRawSection',
+        'ocr': 'ocrSection'
     };
     
-    const targetContent = document.getElementById(tabMapping[tabId]);
-    if (targetContent) {
-        targetContent.classList.add('active');
+    const sectionId = sectionMap[sectionName];
+    const section = document.getElementById(sectionId);
+    
+    if (section) {
+        section.classList.toggle('collapsed');
+    }
+}
+
+function expandSection(sectionName) {
+    const sectionMap = {
+        'activity': 'activitySection',
+        'llmRaw': 'llmRawSection',
+        'ocr': 'ocrSection'
+    };
+    
+    const sectionId = sectionMap[sectionName];
+    const section = document.getElementById(sectionId);
+    
+    if (section) {
+        section.classList.remove('collapsed');
     }
 }
 
@@ -192,7 +218,7 @@ function clearActivityLog() {
     const entries = document.getElementById('activityLogEntries');
     if (entries) {
         entries.innerHTML = '';
-        addLogEntry('Activity log cleared', 'info');
+        addLogEntry('Log cleared', 'info');
     }
 }
 
@@ -250,12 +276,10 @@ function showLlmRawOutput(show = true) {
     const output = document.getElementById('llmRawOutput');
     const stats = document.getElementById('llmRawStats');
     const streamingIndicator = document.getElementById('llmStreamingIndicator');
-    const statusDot = document.getElementById('llmStatusDot');
-    const statusText = document.getElementById('llmStatusText');
     
     if (show) {
-        // Switch to LLM Raw tab
-        switchRightPanelTab('llm-raw');
+        // Expand the LLM section
+        expandSection('llmRaw');
         
         // Clear previous output
         if (output) {
@@ -265,26 +289,14 @@ function showLlmRawOutput(show = true) {
         // Show stats
         if (stats) stats.style.display = 'flex';
         
-        // Update indicators
+        // Update streaming indicator
         if (streamingIndicator) {
             streamingIndicator.classList.add('streaming');
         }
-        if (statusDot) {
-            statusDot.className = 'status-dot streaming';
-        }
-        if (statusText) {
-            statusText.textContent = 'Streaming...';
-        }
     } else {
-        // Hide streaming indicators
+        // Hide streaming indicator
         if (streamingIndicator) {
             streamingIndicator.classList.remove('streaming');
-        }
-        if (statusDot) {
-            statusDot.className = 'status-dot success';
-        }
-        if (statusText) {
-            statusText.textContent = 'Complete';
         }
     }
 }
@@ -335,18 +347,10 @@ function updateLlmRawMeta(mode, model) {
 
 function setLlmRawError(message) {
     const output = document.getElementById('llmRawOutput');
-    const statusDot = document.getElementById('llmStatusDot');
-    const statusText = document.getElementById('llmStatusText');
     const streamingIndicator = document.getElementById('llmStreamingIndicator');
     
     if (output) {
         output.innerHTML = `<div style="color: var(--accent-danger);">Error: ${message}</div>`;
-    }
-    if (statusDot) {
-        statusDot.className = 'status-dot error';
-    }
-    if (statusText) {
-        statusText.textContent = 'Error';
     }
     if (streamingIndicator) {
         streamingIndicator.classList.remove('streaming');
@@ -454,15 +458,42 @@ function addImageToList(image) {
     item.dataset.id = image.id;
     item.innerHTML = `
         <img src="/api/image/${image.id}" alt="${image.filename}">
-        <span class="filename">${image.filename}</span>
+        <div class="image-item-info">
+            <span class="filename">${image.filename}</span>
+            <div class="image-status-icons">
+                <span class="status-icon ocr-status" title="OCR" style="display: none;">📝</span>
+                <span class="status-icon llm-status" title="LLM" style="display: none;">🤖</span>
+            </div>
+        </div>
     `;
     item.addEventListener('click', () => selectImage(image.id));
     elements.imageList.appendChild(item);
 }
 
+// Update image list item status indicators
+function updateImageListStatus(imageId) {
+    const item = document.querySelector(`.image-item[data-id="${imageId}"]`);
+    if (!item) return;
+    
+    const cache = getImageCache(imageId);
+    const ocrIcon = item.querySelector('.ocr-status');
+    const llmIcon = item.querySelector('.llm-status');
+    
+    if (ocrIcon) {
+        ocrIcon.style.display = cache.isRecognized ? 'inline' : 'none';
+    }
+    if (llmIcon) {
+        llmIcon.style.display = cache.isLlmProcessed ? 'inline' : 'none';
+    }
+}
+
 function selectImage(imageId) {
+    // Save current image state to cache before switching
+    if (state.selectedImageId && state.selectedImageId !== imageId) {
+        saveCurrentImageToCache();
+    }
+    
     state.selectedImageId = imageId;
-    state.ocrResult = null;
     state.selectedLineIndex = null;
     
     // Update list UI
@@ -478,31 +509,250 @@ function selectImage(imageId) {
     // Reset zoom
     setZoom(100);
     
-    // Clear overlay and JSON
-    elements.textOverlay.innerHTML = '';
-    elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
+    // Get cached data for this image
+    const cache = getImageCache(imageId);
+    
+    // Restore from cache or clear UI
+    if (cache.isRecognized && cache.ocrResult) {
+        // Restore OCR results
+        state.ocrResult = cache.ocrResult;
+        displayOcrResult(cache.ocrResult);
+        elements.saveBtn.disabled = false;
+        
+        // Restore OCR timing
+        if (cache.ocrTiming) {
+            showOcrTiming(cache.ocrTiming);
+        }
+    } else {
+        // Clear OCR display
+        state.ocrResult = null;
+        elements.textOverlay.innerHTML = '';
+        elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
+        elements.saveBtn.disabled = true;
+        hideOcrTiming();
+        updateLineCount(0);
+    }
+    
+    // Restore LLM results
+    if (cache.isLlmProcessed && cache.llmResult) {
+        state.llmResult = cache.llmResult;
+        displayLlmResultMain(cache.llmResult);
+        
+        // Restore LLM raw output
+        if (cache.llmRawOutput) {
+            restoreLlmRawOutput(cache);
+        }
+    } else {
+        // Clear LLM display
+        state.llmResult = null;
+        clearLlmDisplay();
+    }
+    
+    // Restore activity logs for this image
+    restoreActivityLogs(cache.activityLogs);
     
     // Enable buttons
     elements.normalizeBtn.disabled = false;
     elements.recognizeBtn.disabled = false;
-    elements.saveBtn.disabled = true;
     
-    // Hide OCR timing info
-    const ocrTimingInfo = document.getElementById('ocrTimingInfo');
-    if (ocrTimingInfo) {
-        ocrTimingInfo.style.display = 'none';
+    // Update process LLM button state
+    const processBtn = document.getElementById('processLlmBtnMain');
+    if (processBtn) {
+        processBtn.disabled = !cache.isRecognized;
     }
     
-    // Reset line count
-    const lineCount = document.getElementById('lineCount');
-    if (lineCount) {
-        lineCount.textContent = '0 lines';
-    }
-    
-    // Log selection
+    // Log selection (add to this image's log)
     const selectedImg = state.images.find(img => img.id === imageId);
     if (selectedImg) {
         addLogEntry(`Selected: ${selectedImg.filename}`, 'info');
+    }
+}
+
+// Save current image state to cache
+function saveCurrentImageToCache() {
+    if (!state.selectedImageId) return;
+    
+    const cache = getImageCache(state.selectedImageId);
+    
+    // Save OCR results
+    cache.ocrResult = state.ocrResult;
+    cache.isRecognized = !!state.ocrResult;
+    
+    // Save LLM results
+    cache.llmResult = state.llmResult;
+    cache.isLlmProcessed = !!state.llmResult;
+    
+    // Save current activity logs
+    const logEntries = document.getElementById('activityLogEntries');
+    if (logEntries) {
+        cache.activityLogs = Array.from(logEntries.children).map(entry => ({
+            className: entry.className,
+            innerHTML: entry.innerHTML
+        }));
+    }
+    
+    // Save LLM raw output
+    const llmOutput = document.getElementById('llmRawOutput');
+    if (llmOutput) {
+        cache.llmRawOutput = llmOutput.innerHTML;
+    }
+    
+    // Save LLM stats
+    const tokensEl = document.getElementById('llmRawTokens');
+    const timeEl = document.getElementById('llmRawTime');
+    if (tokensEl && timeEl) {
+        cache.llmStats = {
+            tokens: tokensEl.textContent,
+            timeMs: timeEl.textContent
+        };
+    }
+    
+    // Save LLM meta
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    cache.llmMeta = {
+        mode: modeBadge ? { text: modeBadge.textContent, className: modeBadge.className, display: modeBadge.style.display } : null,
+        model: modelBadge ? { text: modelBadge.textContent, display: modelBadge.style.display } : null
+    };
+    
+    // Save OCR timing
+    const timingValue = document.getElementById('ocrTimingValue');
+    const timingInfo = document.getElementById('ocrTimingInfo');
+    if (timingValue && timingInfo && timingInfo.style.display !== 'none') {
+        cache.ocrTiming = timingValue.textContent;
+    }
+}
+
+// Display OCR result (text overlay and JSON)
+function displayOcrResult(result) {
+    if (!result) return;
+    
+    // Update JSON output
+    elements.jsonOutput.textContent = JSON.stringify(result, null, 2);
+    
+    // Update line count
+    const lineCount = result.text_lines?.length || 0;
+    updateLineCount(lineCount);
+    
+    // Render bounding boxes
+    renderTextOverlay(result.text_lines || []);
+    
+    // Update document class display
+    if (result.document_class) {
+        const container = document.getElementById('documentClassContainer');
+        const valueEl = document.getElementById('documentClassValue');
+        const confEl = document.getElementById('documentClassConfidence');
+        
+        if (container && valueEl) {
+            container.style.display = 'flex';
+            const docClass = result.document_class;
+            valueEl.textContent = docClass.display_name || docClass.class || 'Unknown';
+            valueEl.className = `document-class-value class-${(docClass.type_id || docClass.class || 'unknown').toLowerCase()}`;
+            
+            if (confEl && docClass.confidence) {
+                confEl.textContent = `${(docClass.confidence * 100).toFixed(1)}%`;
+            }
+        }
+    } else {
+        const container = document.getElementById('documentClassContainer');
+        if (container) container.style.display = 'none';
+    }
+}
+
+// Restore activity logs from cache
+function restoreActivityLogs(logs) {
+    const logEntries = document.getElementById('activityLogEntries');
+    if (!logEntries) return;
+    
+    logEntries.innerHTML = '';
+    
+    if (logs && logs.length > 0) {
+        logs.forEach(log => {
+            const entry = document.createElement('div');
+            entry.className = log.className;
+            entry.innerHTML = log.innerHTML;
+            logEntries.appendChild(entry);
+        });
+        logEntries.scrollTop = logEntries.scrollHeight;
+    } else {
+        // Default empty state
+        const entry = document.createElement('div');
+        entry.className = 'log-entry log-info';
+        entry.innerHTML = '<span class="log-time">--:--:--</span><span class="log-message">Ready</span>';
+        logEntries.appendChild(entry);
+    }
+}
+
+// Restore LLM raw output from cache
+function restoreLlmRawOutput(cache) {
+    const output = document.getElementById('llmRawOutput');
+    const stats = document.getElementById('llmRawStats');
+    const tokensEl = document.getElementById('llmRawTokens');
+    const timeEl = document.getElementById('llmRawTime');
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    
+    if (output && cache.llmRawOutput) {
+        output.innerHTML = cache.llmRawOutput;
+    }
+    
+    if (stats && cache.llmStats.tokens !== '0') {
+        stats.style.display = 'flex';
+        if (tokensEl) tokensEl.textContent = cache.llmStats.tokens;
+        if (timeEl) timeEl.textContent = cache.llmStats.timeMs;
+    }
+    
+    if (modeBadge && cache.llmMeta.mode) {
+        modeBadge.textContent = cache.llmMeta.mode.text;
+        modeBadge.className = cache.llmMeta.mode.className;
+        modeBadge.style.display = cache.llmMeta.mode.display;
+    }
+    
+    if (modelBadge && cache.llmMeta.model) {
+        modelBadge.textContent = cache.llmMeta.model.text;
+        modelBadge.style.display = cache.llmMeta.model.display;
+    }
+}
+
+// Clear LLM display
+function clearLlmDisplay() {
+    const placeholder = document.getElementById('llmPlaceholderMain');
+    const resultDiv = document.getElementById('llmResultMain');
+    const output = document.getElementById('llmRawOutput');
+    const stats = document.getElementById('llmRawStats');
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    
+    if (placeholder) placeholder.style.display = 'flex';
+    if (resultDiv) resultDiv.style.display = 'none';
+    if (output) output.innerHTML = '<span class="llm-idle-text">Waiting for LLM processing...</span>';
+    if (stats) stats.style.display = 'none';
+    if (modeBadge) modeBadge.style.display = 'none';
+    if (modelBadge) modelBadge.style.display = 'none';
+}
+
+// Show/hide OCR timing
+function showOcrTiming(timing) {
+    const timingInfo = document.getElementById('ocrTimingInfo');
+    const timingValue = document.getElementById('ocrTimingValue');
+    if (timingInfo && timingValue) {
+        timingValue.textContent = timing;
+        timingInfo.style.display = 'flex';
+    }
+}
+
+function hideOcrTiming() {
+    const timingInfo = document.getElementById('ocrTimingInfo');
+    if (timingInfo) {
+        timingInfo.style.display = 'none';
+    }
+}
+
+// Update line count display
+function updateLineCount(count) {
+    const lineCountEl = document.getElementById('lineCount');
+    if (lineCountEl) {
+        lineCountEl.textContent = `${count} lines`;
     }
 }
 
@@ -544,7 +794,29 @@ async function normalizeImage() {
         // Clear overlay on normalization
         elements.textOverlay.innerHTML = '';
         state.ocrResult = null;
+        state.llmResult = null;
         elements.saveBtn.disabled = true;
+        
+        // Clear cache for this image (need to re-recognize after normalize)
+        const cache = getImageCache(state.selectedImageId);
+        cache.ocrResult = null;
+        cache.llmResult = null;
+        cache.isRecognized = false;
+        cache.isLlmProcessed = false;
+        cache.isNormalized = true;
+        cache.ocrTiming = null;
+        cache.llmRawOutput = '';
+        cache.llmStats = { tokens: 0, timeMs: 0 };
+        
+        // Clear LLM and OCR displays
+        clearLlmDisplay();
+        hideOcrTiming();
+        updateLineCount(0);
+        elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
+        
+        // Update process button state
+        const processBtn = document.getElementById('processLlmBtnMain');
+        if (processBtn) processBtn.disabled = true;
         
         addLogEntry(`Normalized by ${data.angle.toFixed(2)}°`, 'success', formatDuration(elapsed));
         
@@ -581,7 +853,14 @@ async function recognizeImage() {
         
         const data = await response.json();
         const elapsed = Date.now() - startTime;
+        const elapsedStr = formatDuration(elapsed);
         state.ocrResult = data;
+        
+        // Update cache
+        const cache = getImageCache(state.selectedImageId);
+        cache.ocrResult = data;
+        cache.isRecognized = true;
+        cache.ocrTiming = elapsedStr;
         
         // Display JSON
         updateJsonOutput();
@@ -603,21 +882,16 @@ async function recognizeImage() {
         fetchDeviceInfo();
         
         // Update line count
-        const lineCount = document.getElementById('lineCount');
-        if (lineCount && data.text_lines) {
-            lineCount.textContent = `${data.text_lines.length} lines`;
-        }
+        updateLineCount(data.text_lines?.length || 0);
         
         // Show OCR timing
-        const ocrTimingInfo = document.getElementById('ocrTimingInfo');
-        const ocrTimingValue = document.getElementById('ocrTimingValue');
-        if (ocrTimingInfo && ocrTimingValue) {
-            ocrTimingInfo.style.display = 'flex';
-            ocrTimingValue.textContent = formatDuration(elapsed);
-        }
+        showOcrTiming(elapsedStr);
         
         const docType = data.document_class?.class || 'Unknown';
-        addLogEntry(`OCR complete: ${data.text_lines?.length || 0} lines, type: ${docType}`, 'success', formatDuration(elapsed));
+        addLogEntry(`OCR complete: ${data.text_lines?.length || 0} lines, type: ${docType}`, 'success', elapsedStr);
+        
+        // Update image list status
+        updateImageListStatus(state.selectedImageId);
         
     } catch (error) {
         console.error('Recognition error:', error);
@@ -2212,6 +2486,16 @@ async function processWithLlmMain() {
         if (result) {
             state.llmResult = result;
             displayLlmResultMain(result, elapsed);
+            
+            // Save to cache
+            if (state.selectedImageId) {
+                const cache = getImageCache(state.selectedImageId);
+                cache.llmResult = result;
+                cache.isLlmProcessed = true;
+                
+                // Update image list status
+                updateImageListStatus(state.selectedImageId);
+            }
             
             const modeTag = mode === 'vision' ? ' [Vision]' : ' [Text]';
             const tokenInfo = state.llmTokenCount > 0 ? `, ${state.llmTokenCount} tokens` : '';
