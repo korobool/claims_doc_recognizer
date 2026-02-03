@@ -10,6 +10,7 @@ const state = {
     isDrawing: false,
     drawStart: null,
     deviceInfoExpanded: false,
+    statusLogExpanded: true,
     // LLM state
     llmStatus: {
         ollamaAvailable: false,
@@ -20,8 +21,38 @@ const state = {
     // Schema management state
     schemas: [],
     selectedSchemaId: null,
-    schemaYamlDirty: false
+    schemaYamlDirty: false,
+    // Timing state
+    currentTimer: null,
+    llmStartTime: null,
+    llmTokenCount: 0,
+    // Per-image cache: stores OCR results, LLM results, logs, etc.
+    imageCache: {}
 };
+
+// Structure for per-image cached data
+function createImageCacheEntry() {
+    return {
+        ocrResult: null,
+        llmResult: null,
+        activityLogs: [],
+        llmRawOutput: '',
+        llmStats: { tokens: 0, timeMs: 0 },
+        llmMeta: { mode: null, model: null },
+        ocrTiming: null,
+        isNormalized: false,
+        isRecognized: false,
+        isLlmProcessed: false
+    };
+}
+
+// Get or create cache entry for an image
+function getImageCache(imageId) {
+    if (!state.imageCache[imageId]) {
+        state.imageCache[imageId] = createImageCacheEntry();
+    }
+    return state.imageCache[imageId];
+}
 
 // DOM elements
 const elements = {
@@ -38,7 +69,7 @@ const elements = {
     mainImage: document.getElementById('mainImage'),
     textOverlay: document.getElementById('textOverlay'),
     jsonOutput: document.getElementById('jsonOutput'),
-    zoomControls: document.getElementById('zoomControls'),
+    // Zoom controls (now in toolbar)
     zoomSlider: document.getElementById('zoomSlider'),
     zoomInBtn: document.getElementById('zoomInBtn'),
     zoomOutBtn: document.getElementById('zoomOutBtn'),
@@ -131,6 +162,220 @@ function init() {
     
     // Initialize schema management
     initSchemaManagement();
+    
+    // Initialize right panel tabs
+    initRightPanelTabs();
+    
+    // Clear activity log button
+    const clearBtn = document.getElementById('clearActivityBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearActivityLog);
+    }
+    
+    // Log initialization
+    addLogEntry('System initialized', 'info');
+}
+
+// =============================================================================
+// RIGHT PANEL SECTIONS (Collapsible)
+// =============================================================================
+
+function initRightPanelTabs() {
+    // Legacy - no longer using tabs, using collapsible sections
+}
+
+function toggleSection(sectionName) {
+    const sectionMap = {
+        'activity': 'activitySection',
+        'llmRaw': 'llmRawSection',
+        'ocr': 'ocrSection'
+    };
+    
+    const sectionId = sectionMap[sectionName];
+    const section = document.getElementById(sectionId);
+    
+    if (section) {
+        section.classList.toggle('collapsed');
+    }
+}
+
+function expandSection(sectionName) {
+    const sectionMap = {
+        'activity': 'activitySection',
+        'llmRaw': 'llmRawSection',
+        'ocr': 'ocrSection'
+    };
+    
+    const sectionId = sectionMap[sectionName];
+    const section = document.getElementById(sectionId);
+    
+    if (section) {
+        section.classList.remove('collapsed');
+    }
+}
+
+function clearActivityLog() {
+    const entries = document.getElementById('activityLogEntries');
+    if (entries) {
+        entries.innerHTML = '';
+        addLogEntry('Log cleared', 'info');
+    }
+}
+
+// =============================================================================
+// ACTIVITY LOG & LLM RAW OUTPUT FUNCTIONS
+// =============================================================================
+
+function addLogEntry(message, type = 'info', timing = null) {
+    const entries = document.getElementById('activityLogEntries');
+    if (!entries) return;
+    
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    
+    let html = `<span class="log-time">${time}</span><span class="log-message">${message}</span>`;
+    if (timing !== null) {
+        html += `<span class="log-timing">${timing}</span>`;
+    }
+    
+    entry.innerHTML = html;
+    entries.appendChild(entry);
+    
+    // Auto-scroll to bottom
+    entries.scrollTop = entries.scrollHeight;
+    
+    // Limit entries (keep last 100)
+    while (entries.children.length > 100) {
+        entries.removeChild(entries.firstChild);
+    }
+    
+    // Update activity indicator
+    updateActivityIndicator(type);
+}
+
+function updateActivityIndicator(type) {
+    const indicator = document.getElementById('activityIndicator');
+    if (!indicator) return;
+    
+    indicator.className = 'activity-indicator';
+    
+    if (type === 'processing') {
+        indicator.classList.add('processing');
+    } else if (type === 'success') {
+        indicator.classList.add('active');
+        setTimeout(() => {
+            indicator.className = 'activity-indicator';
+        }, 3000);
+    }
+}
+
+// LLM Raw Output functions
+function showLlmRawOutput(show = true) {
+    const output = document.getElementById('llmRawOutput');
+    const stats = document.getElementById('llmRawStats');
+    const streamingIndicator = document.getElementById('llmStreamingIndicator');
+    
+    if (show) {
+        // Expand the LLM section
+        expandSection('llmRaw');
+        
+        // Clear previous output
+        if (output) {
+            output.innerHTML = '<span class="tokens"></span>';
+        }
+        
+        // Show stats
+        if (stats) stats.style.display = 'flex';
+        
+        // Update streaming indicator
+        if (streamingIndicator) {
+            streamingIndicator.classList.add('streaming');
+        }
+    } else {
+        // Hide streaming indicator
+        if (streamingIndicator) {
+            streamingIndicator.classList.remove('streaming');
+        }
+    }
+}
+
+function updateLlmRawContent(text, append = true) {
+    const output = document.getElementById('llmRawOutput');
+    if (!output) return;
+    
+    let tokensSpan = output.querySelector('.tokens');
+    if (!tokensSpan) {
+        output.innerHTML = '<span class="tokens"></span>';
+        tokensSpan = output.querySelector('.tokens');
+    }
+    
+    if (append) {
+        tokensSpan.textContent += text;
+    } else {
+        tokensSpan.textContent = text;
+    }
+    
+    // Auto-scroll
+    output.scrollTop = output.scrollHeight;
+}
+
+function updateLlmRawStats(tokens, timeMs) {
+    const tokensEl = document.getElementById('llmRawTokens');
+    const timeEl = document.getElementById('llmRawTime');
+    
+    if (tokensEl) tokensEl.textContent = tokens;
+    if (timeEl) timeEl.textContent = formatDuration(timeMs);
+}
+
+function updateLlmRawMeta(mode, model) {
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    
+    if (modeBadge) {
+        modeBadge.textContent = mode === 'vision' ? '👁️ Vision' : '📝 Text';
+        modeBadge.className = `meta-badge ${mode}`;
+        modeBadge.style.display = 'inline-block';
+    }
+    
+    if (modelBadge && model) {
+        modelBadge.textContent = model;
+        modelBadge.style.display = 'inline-block';
+    }
+}
+
+function setLlmRawError(message) {
+    const output = document.getElementById('llmRawOutput');
+    const streamingIndicator = document.getElementById('llmStreamingIndicator');
+    
+    if (output) {
+        output.innerHTML = `<div style="color: var(--accent-danger);">Error: ${message}</div>`;
+    }
+    if (streamingIndicator) {
+        streamingIndicator.classList.remove('streaming');
+    }
+}
+
+// Legacy compatibility wrappers
+function showStreamingOutput(show = true) {
+    showLlmRawOutput(show);
+}
+
+function updateStreamingContent(text, append = true) {
+    updateLlmRawContent(text, append);
+}
+
+function formatDuration(ms) {
+    if (ms < 1000) {
+        return `${ms}ms`;
+    } else if (ms < 60000) {
+        return `${(ms / 1000).toFixed(1)}s`;
+    } else {
+        const minutes = Math.floor(ms / 60000);
+        const seconds = ((ms % 60000) / 1000).toFixed(1);
+        return `${minutes}m ${seconds}s`;
+    }
 }
 
 // === File upload ===
@@ -167,6 +412,10 @@ async function uploadFiles(files) {
         formData.append('files', file);
     }
     
+    const startTime = Date.now();
+    addLogEntry(`Uploading ${files.length} file(s)...`, 'processing');
+    updateActivityIndicator('processing');
+    
     try {
         const response = await fetch('/api/upload', {
             method: 'POST',
@@ -178,6 +427,7 @@ async function uploadFiles(files) {
         }
         
         const data = await response.json();
+        const elapsed = Date.now() - startTime;
         
         // Add images to list
         for (const img of data.images) {
@@ -190,8 +440,11 @@ async function uploadFiles(files) {
             selectImage(data.images[0].id);
         }
         
+        addLogEntry(`Uploaded ${data.images.length} file(s) successfully`, 'success', formatDuration(elapsed));
+        
     } catch (error) {
         console.error('Upload error:', error);
+        addLogEntry(`Upload failed: ${error.message}`, 'error');
         alert('Error uploading files');
     }
     
@@ -205,15 +458,42 @@ function addImageToList(image) {
     item.dataset.id = image.id;
     item.innerHTML = `
         <img src="/api/image/${image.id}" alt="${image.filename}">
-        <span class="filename">${image.filename}</span>
+        <div class="image-item-info">
+            <span class="filename">${image.filename}</span>
+            <div class="image-status-icons">
+                <span class="status-icon ocr-status" title="OCR" style="display: none;">📝</span>
+                <span class="status-icon llm-status" title="LLM" style="display: none;">🤖</span>
+            </div>
+        </div>
     `;
     item.addEventListener('click', () => selectImage(image.id));
     elements.imageList.appendChild(item);
 }
 
+// Update image list item status indicators
+function updateImageListStatus(imageId) {
+    const item = document.querySelector(`.image-item[data-id="${imageId}"]`);
+    if (!item) return;
+    
+    const cache = getImageCache(imageId);
+    const ocrIcon = item.querySelector('.ocr-status');
+    const llmIcon = item.querySelector('.llm-status');
+    
+    if (ocrIcon) {
+        ocrIcon.style.display = cache.isRecognized ? 'inline' : 'none';
+    }
+    if (llmIcon) {
+        llmIcon.style.display = cache.isLlmProcessed ? 'inline' : 'none';
+    }
+}
+
 function selectImage(imageId) {
+    // Save current image state to cache before switching
+    if (state.selectedImageId && state.selectedImageId !== imageId) {
+        saveCurrentImageToCache();
+    }
+    
     state.selectedImageId = imageId;
-    state.ocrResult = null;
     state.selectedLineIndex = null;
     
     // Update list UI
@@ -221,23 +501,259 @@ function selectImage(imageId) {
         item.classList.toggle('selected', item.dataset.id === imageId);
     });
     
-    // Show image and zoom controls
+    // Show image
     elements.placeholder.style.display = 'none';
     elements.zoomWrapper.style.display = 'flex';
-    elements.zoomControls.style.display = 'flex';
     elements.mainImage.src = `/api/image/${imageId}?t=${Date.now()}`;
     
     // Reset zoom
     setZoom(100);
     
-    // Clear overlay and JSON
-    elements.textOverlay.innerHTML = '';
-    elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
+    // Get cached data for this image
+    const cache = getImageCache(imageId);
+    
+    // Restore from cache or clear UI
+    if (cache.isRecognized && cache.ocrResult) {
+        // Restore OCR results
+        state.ocrResult = cache.ocrResult;
+        displayOcrResult(cache.ocrResult);
+        elements.saveBtn.disabled = false;
+        
+        // Restore OCR timing
+        if (cache.ocrTiming) {
+            showOcrTiming(cache.ocrTiming);
+        }
+    } else {
+        // Clear OCR display
+        state.ocrResult = null;
+        elements.textOverlay.innerHTML = '';
+        elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
+        elements.saveBtn.disabled = true;
+        hideOcrTiming();
+        updateLineCount(0);
+    }
+    
+    // Restore LLM results
+    if (cache.isLlmProcessed && cache.llmResult) {
+        state.llmResult = cache.llmResult;
+        displayLlmResultMain(cache.llmResult);
+        
+        // Restore LLM raw output
+        if (cache.llmRawOutput) {
+            restoreLlmRawOutput(cache);
+        }
+    } else {
+        // Clear LLM display
+        state.llmResult = null;
+        clearLlmDisplay();
+    }
+    
+    // Restore activity logs for this image
+    restoreActivityLogs(cache.activityLogs);
     
     // Enable buttons
     elements.normalizeBtn.disabled = false;
     elements.recognizeBtn.disabled = false;
-    elements.saveBtn.disabled = true;
+    
+    // Update process LLM button state
+    const processBtn = document.getElementById('processLlmBtnMain');
+    if (processBtn) {
+        processBtn.disabled = !cache.isRecognized;
+    }
+    
+    // Log selection (add to this image's log)
+    const selectedImg = state.images.find(img => img.id === imageId);
+    if (selectedImg) {
+        addLogEntry(`Selected: ${selectedImg.filename}`, 'info');
+    }
+}
+
+// Save current image state to cache
+function saveCurrentImageToCache() {
+    if (!state.selectedImageId) return;
+    
+    const cache = getImageCache(state.selectedImageId);
+    
+    // Save OCR results
+    cache.ocrResult = state.ocrResult;
+    cache.isRecognized = !!state.ocrResult;
+    
+    // Save LLM results
+    cache.llmResult = state.llmResult;
+    cache.isLlmProcessed = !!state.llmResult;
+    
+    // Save current activity logs
+    const logEntries = document.getElementById('activityLogEntries');
+    if (logEntries) {
+        cache.activityLogs = Array.from(logEntries.children).map(entry => ({
+            className: entry.className,
+            innerHTML: entry.innerHTML
+        }));
+    }
+    
+    // Save LLM raw output
+    const llmOutput = document.getElementById('llmRawOutput');
+    if (llmOutput) {
+        cache.llmRawOutput = llmOutput.innerHTML;
+    }
+    
+    // Save LLM stats
+    const tokensEl = document.getElementById('llmRawTokens');
+    const timeEl = document.getElementById('llmRawTime');
+    if (tokensEl && timeEl) {
+        cache.llmStats = {
+            tokens: tokensEl.textContent,
+            timeMs: timeEl.textContent
+        };
+    }
+    
+    // Save LLM meta
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    cache.llmMeta = {
+        mode: modeBadge ? { text: modeBadge.textContent, className: modeBadge.className, display: modeBadge.style.display } : null,
+        model: modelBadge ? { text: modelBadge.textContent, display: modelBadge.style.display } : null
+    };
+    
+    // Save OCR timing
+    const timingValue = document.getElementById('ocrTimingValue');
+    const timingInfo = document.getElementById('ocrTimingInfo');
+    if (timingValue && timingInfo && timingInfo.style.display !== 'none') {
+        cache.ocrTiming = timingValue.textContent;
+    }
+}
+
+// Display OCR result (text overlay and JSON)
+function displayOcrResult(result) {
+    if (!result) return;
+    
+    // Update JSON output
+    elements.jsonOutput.textContent = JSON.stringify(result, null, 2);
+    
+    // Update line count
+    const lineCount = result.text_lines?.length || 0;
+    updateLineCount(lineCount);
+    
+    // Render bounding boxes
+    renderTextOverlay(result.text_lines || []);
+    
+    // Update document class display
+    if (result.document_class) {
+        const container = document.getElementById('documentClassContainer');
+        const valueEl = document.getElementById('documentClassValue');
+        const confEl = document.getElementById('documentClassConfidence');
+        
+        if (container && valueEl) {
+            container.style.display = 'flex';
+            const docClass = result.document_class;
+            valueEl.textContent = docClass.display_name || docClass.class || 'Unknown';
+            valueEl.className = `document-class-value class-${(docClass.type_id || docClass.class || 'unknown').toLowerCase()}`;
+            
+            if (confEl && docClass.confidence) {
+                confEl.textContent = `${(docClass.confidence * 100).toFixed(1)}%`;
+            }
+        }
+    } else {
+        const container = document.getElementById('documentClassContainer');
+        if (container) container.style.display = 'none';
+    }
+}
+
+// Restore activity logs from cache
+function restoreActivityLogs(logs) {
+    const logEntries = document.getElementById('activityLogEntries');
+    if (!logEntries) return;
+    
+    logEntries.innerHTML = '';
+    
+    if (logs && logs.length > 0) {
+        logs.forEach(log => {
+            const entry = document.createElement('div');
+            entry.className = log.className;
+            entry.innerHTML = log.innerHTML;
+            logEntries.appendChild(entry);
+        });
+        logEntries.scrollTop = logEntries.scrollHeight;
+    } else {
+        // Default empty state
+        const entry = document.createElement('div');
+        entry.className = 'log-entry log-info';
+        entry.innerHTML = '<span class="log-time">--:--:--</span><span class="log-message">Ready</span>';
+        logEntries.appendChild(entry);
+    }
+}
+
+// Restore LLM raw output from cache
+function restoreLlmRawOutput(cache) {
+    const output = document.getElementById('llmRawOutput');
+    const stats = document.getElementById('llmRawStats');
+    const tokensEl = document.getElementById('llmRawTokens');
+    const timeEl = document.getElementById('llmRawTime');
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    
+    if (output && cache.llmRawOutput) {
+        output.innerHTML = cache.llmRawOutput;
+    }
+    
+    if (stats && cache.llmStats.tokens !== '0') {
+        stats.style.display = 'flex';
+        if (tokensEl) tokensEl.textContent = cache.llmStats.tokens;
+        if (timeEl) timeEl.textContent = cache.llmStats.timeMs;
+    }
+    
+    if (modeBadge && cache.llmMeta.mode) {
+        modeBadge.textContent = cache.llmMeta.mode.text;
+        modeBadge.className = cache.llmMeta.mode.className;
+        modeBadge.style.display = cache.llmMeta.mode.display;
+    }
+    
+    if (modelBadge && cache.llmMeta.model) {
+        modelBadge.textContent = cache.llmMeta.model.text;
+        modelBadge.style.display = cache.llmMeta.model.display;
+    }
+}
+
+// Clear LLM display
+function clearLlmDisplay() {
+    const placeholder = document.getElementById('llmPlaceholderMain');
+    const resultDiv = document.getElementById('llmResultMain');
+    const output = document.getElementById('llmRawOutput');
+    const stats = document.getElementById('llmRawStats');
+    const modeBadge = document.getElementById('llmModeBadge');
+    const modelBadge = document.getElementById('llmModelBadge');
+    
+    if (placeholder) placeholder.style.display = 'flex';
+    if (resultDiv) resultDiv.style.display = 'none';
+    if (output) output.innerHTML = '<span class="llm-idle-text">Waiting for LLM processing...</span>';
+    if (stats) stats.style.display = 'none';
+    if (modeBadge) modeBadge.style.display = 'none';
+    if (modelBadge) modelBadge.style.display = 'none';
+}
+
+// Show/hide OCR timing
+function showOcrTiming(timing) {
+    const timingInfo = document.getElementById('ocrTimingInfo');
+    const timingValue = document.getElementById('ocrTimingValue');
+    if (timingInfo && timingValue) {
+        timingValue.textContent = timing;
+        timingInfo.style.display = 'flex';
+    }
+}
+
+function hideOcrTiming() {
+    const timingInfo = document.getElementById('ocrTimingInfo');
+    if (timingInfo) {
+        timingInfo.style.display = 'none';
+    }
+}
+
+// Update line count display
+function updateLineCount(count) {
+    const lineCountEl = document.getElementById('lineCount');
+    if (lineCountEl) {
+        lineCountEl.textContent = `${count} lines`;
+    }
 }
 
 // === Image processing ===
@@ -247,6 +763,10 @@ async function normalizeImage() {
     
     elements.normalizeBtn.classList.add('loading');
     elements.normalizeBtn.disabled = true;
+    
+    const startTime = Date.now();
+    addLogEntry('Normalizing image (deskew)...', 'processing');
+    updateActivityIndicator('processing');
     
     try {
         const response = await fetch('/api/normalize', {
@@ -260,6 +780,7 @@ async function normalizeImage() {
         }
         
         const data = await response.json();
+        const elapsed = Date.now() - startTime;
         
         // Update image
         elements.mainImage.src = `/api/image/${state.selectedImageId}?t=${Date.now()}`;
@@ -273,12 +794,35 @@ async function normalizeImage() {
         // Clear overlay on normalization
         elements.textOverlay.innerHTML = '';
         state.ocrResult = null;
+        state.llmResult = null;
         elements.saveBtn.disabled = true;
         
-        console.log(`Normalized by ${data.angle.toFixed(2)}°`);
+        // Clear cache for this image (need to re-recognize after normalize)
+        const cache = getImageCache(state.selectedImageId);
+        cache.ocrResult = null;
+        cache.llmResult = null;
+        cache.isRecognized = false;
+        cache.isLlmProcessed = false;
+        cache.isNormalized = true;
+        cache.ocrTiming = null;
+        cache.llmRawOutput = '';
+        cache.llmStats = { tokens: 0, timeMs: 0 };
+        
+        // Clear LLM and OCR displays
+        clearLlmDisplay();
+        hideOcrTiming();
+        updateLineCount(0);
+        elements.jsonOutput.textContent = JSON.stringify({ text_lines: [], image_bbox: [] }, null, 2);
+        
+        // Update process button state
+        const processBtn = document.getElementById('processLlmBtnMain');
+        if (processBtn) processBtn.disabled = true;
+        
+        addLogEntry(`Normalized by ${data.angle.toFixed(2)}°`, 'success', formatDuration(elapsed));
         
     } catch (error) {
         console.error('Normalize error:', error);
+        addLogEntry(`Normalization failed: ${error.message}`, 'error');
         alert('Normalization error');
     } finally {
         elements.normalizeBtn.classList.remove('loading');
@@ -292,6 +836,10 @@ async function recognizeImage() {
     elements.recognizeBtn.classList.add('loading');
     elements.recognizeBtn.disabled = true;
     
+    const startTime = Date.now();
+    addLogEntry('Running OCR recognition...', 'processing');
+    updateActivityIndicator('processing');
+    
     try {
         const response = await fetch('/api/recognize', {
             method: 'POST',
@@ -304,7 +852,15 @@ async function recognizeImage() {
         }
         
         const data = await response.json();
+        const elapsed = Date.now() - startTime;
+        const elapsedStr = formatDuration(elapsed);
         state.ocrResult = data;
+        
+        // Update cache
+        const cache = getImageCache(state.selectedImageId);
+        cache.ocrResult = data;
+        cache.isRecognized = true;
+        cache.ocrTiming = elapsedStr;
         
         // Display JSON
         updateJsonOutput();
@@ -325,8 +881,21 @@ async function recognizeImage() {
         // Refresh device info (models are now initialized)
         fetchDeviceInfo();
         
+        // Update line count
+        updateLineCount(data.text_lines?.length || 0);
+        
+        // Show OCR timing
+        showOcrTiming(elapsedStr);
+        
+        const docType = data.document_class?.class || 'Unknown';
+        addLogEntry(`OCR complete: ${data.text_lines?.length || 0} lines, type: ${docType}`, 'success', elapsedStr);
+        
+        // Update image list status
+        updateImageListStatus(state.selectedImageId);
+        
     } catch (error) {
         console.error('Recognition error:', error);
+        addLogEntry(`OCR failed: ${error.message}`, 'error');
         alert('Recognition error');
     } finally {
         elements.recognizeBtn.classList.remove('loading');
@@ -1275,6 +1844,12 @@ async function processWithLlm() {
     // Show loading
     showLlmLoading(true);
     
+    const startTime = Date.now();
+    state.llmStartTime = startTime;
+    addLogEntry(`Processing with LLM (${modelId})...`, 'processing');
+    updateActivityIndicator('processing');
+    startLlmTimer();
+    
     try {
         // Include image_id for vision-enabled models
         // Use image_id from OCR result (more reliable) or fall back to selected image
@@ -1301,15 +1876,48 @@ async function processWithLlm() {
         }
         
         const result = await response.json();
+        const elapsed = Date.now() - startTime;
         state.llmResult = result;
         
-        displayLlmResult(result);
+        stopLlmTimer();
+        displayLlmResult(result, elapsed);
+        
+        const visionTag = result.vision_used ? ' [Vision]' : '';
+        addLogEntry(`LLM processing complete${visionTag}`, 'success', formatDuration(elapsed));
         
     } catch (error) {
         console.error('LLM processing failed:', error);
+        stopLlmTimer();
+        addLogEntry(`LLM failed: ${error.message}`, 'error');
         alert('LLM processing failed: ' + error.message);
         showLlmLoading(false);
     }
+}
+
+function startLlmTimer() {
+    const timerEl = document.getElementById('llmLoadingTimer');
+    const timerElMain = document.getElementById('llmLoadingTimerMain') || timerEl;
+    
+    if (state.currentTimer) {
+        clearInterval(state.currentTimer);
+    }
+    
+    state.currentTimer = setInterval(() => {
+        if (state.llmStartTime) {
+            const elapsed = Date.now() - state.llmStartTime;
+            const text = `${(elapsed / 1000).toFixed(1)}s`;
+            if (timerEl) timerEl.textContent = text;
+            if (timerElMain && timerElMain !== timerEl) timerElMain.textContent = text;
+        }
+    }, 100);
+}
+
+function stopLlmTimer() {
+    if (state.currentTimer) {
+        clearInterval(state.currentTimer);
+        state.currentTimer = null;
+    }
+    state.llmStartTime = null;
 }
 
 function showLlmLoading(show) {
@@ -1318,12 +1926,12 @@ function showLlmLoading(show) {
     if (elements.llmLoading) elements.llmLoading.style.display = show ? 'flex' : 'none';
 }
 
-function displayLlmResult(result) {
+function displayLlmResult(result, elapsedMs = null) {
     showLlmLoading(false);
     
     if (!result.success) {
         if (elements.llmPlaceholder) {
-            elements.llmPlaceholder.innerHTML = `<p>Error: ${result.error || 'Processing failed'}</p>`;
+            elements.llmPlaceholder.innerHTML = `<div class="placeholder-content"><span class="placeholder-icon">⚠️</span><p class="placeholder-text">Error: ${result.error || 'Processing failed'}</p></div>`;
             elements.llmPlaceholder.style.display = 'flex';
         }
         if (elements.llmResult) elements.llmResult.style.display = 'none';
@@ -1770,6 +2378,15 @@ async function processWithLlmMain() {
     resultDiv.style.display = 'none';
     loadingDiv.style.display = 'flex';
     
+    const startTime = Date.now();
+    state.llmStartTime = startTime;
+    state.llmTokenCount = 0;
+    updateActivityIndicator('processing');
+    startLlmTimer();
+    
+    // Show LLM raw output panel (auto-switches to LLM Raw tab)
+    showLlmRawOutput(true);
+    
     try {
         const textLines = state.ocrResult.text_lines || [];
         const fullText = textLines.map(line => line.text).join('\n');
@@ -1778,20 +2395,19 @@ async function processWithLlmMain() {
                             state.ocrResult.document_class?.class?.toLowerCase() || 
                             'unknown';
         
-        // Include image_id for vision-enabled models
-        // Use image_id from OCR result (more reliable) or fall back to selected image
         const imageId = state.ocrResult?.image_id || state.selectedImageId || null;
         const requestBody = {
             text: fullText,
             model: modelId,
             document_type: documentType,
-            image_id: imageId,  // Pass image for vision models
-            use_vision: true  // Enable vision processing when available
+            image_id: imageId,
+            use_vision: true
         };
         
-        console.log('[LLM Main] Sending request with image_id:', imageId, 'body:', requestBody);
+        console.log('[LLM Main] Sending streaming request with image_id:', imageId);
         
-        const response = await fetch('/api/llm/process', {
+        // Use streaming endpoint
+        const response = await fetch('/api/llm/process/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -1802,16 +2418,97 @@ async function processWithLlmMain() {
             throw new Error(error.detail || 'Processing failed');
         }
         
-        const result = await response.json();
-        state.llmResult = result;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let result = null;
+        let mode = 'text';
+        let modelName = modelId;
         
-        // Log if vision was used
-        console.log('[LLM Main] Result - vision_used:', result.vision_used);
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        if (data.status === 'started') {
+                            mode = data.mode || 'text';
+                            modelName = data.model || modelId;
+                            const modeEmoji = mode === 'vision' ? '👁️' : '📝';
+                            addLogEntry(`LLM: ${modelName} [${mode.toUpperCase()}] ${modeEmoji}`, 'processing');
+                            updateLlmLoadingStatus(modelName, mode, 0);
+                            updateLlmRawMeta(mode, modelName);
+                        }
+                        
+                        if (data.status === 'generating') {
+                            state.llmTokenCount = data.token_count || state.llmTokenCount;
+                            const elapsed = Date.now() - startTime;
+                            updateLlmLoadingStatus(modelName, mode, state.llmTokenCount);
+                            updateLlmRawStats(state.llmTokenCount, elapsed);
+                            if (data.tokens) {
+                                updateLlmRawContent(data.tokens, true);
+                            }
+                        }
+                        
+                        if (data.status === 'processing') {
+                            updateLlmLoadingStatus(modelName, mode, state.llmTokenCount, 'Parsing response...');
+                        }
+                        
+                        if (data.status === 'complete') {
+                            result = data.result;
+                            state.llmTokenCount = data.token_count || state.llmTokenCount;
+                        }
+                        
+                        if (data.status === 'error') {
+                            throw new Error(data.error || 'Unknown error');
+                        }
+                    } catch (e) {
+                        if (e.message !== 'Unexpected end of JSON input') {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        }
         
-        displayLlmResultMain(result);
+        const elapsed = Date.now() - startTime;
+        stopLlmTimer();
+        showLlmRawOutput(false);
+        updateLlmRawStats(state.llmTokenCount, elapsed);
+        
+        if (result) {
+            state.llmResult = result;
+            displayLlmResultMain(result, elapsed);
+            
+            // Save to cache
+            if (state.selectedImageId) {
+                const cache = getImageCache(state.selectedImageId);
+                cache.llmResult = result;
+                cache.isLlmProcessed = true;
+                
+                // Update image list status
+                updateImageListStatus(state.selectedImageId);
+            }
+            
+            const modeTag = mode === 'vision' ? ' [Vision]' : ' [Text]';
+            const tokenInfo = state.llmTokenCount > 0 ? `, ${state.llmTokenCount} tokens` : '';
+            addLogEntry(`LLM complete${modeTag}${tokenInfo}`, 'success', formatDuration(elapsed));
+        } else {
+            throw new Error('No result received from LLM');
+        }
         
     } catch (error) {
         console.error('LLM processing failed:', error);
+        stopLlmTimer();
+        setLlmRawError(error.message);
+        addLogEntry(`LLM failed: ${error.message}`, 'error');
         alert('LLM processing failed: ' + error.message);
         placeholder.style.display = 'flex';
     } finally {
@@ -1820,7 +2517,25 @@ async function processWithLlmMain() {
     }
 }
 
-function displayLlmResultMain(result) {
+function updateLlmLoadingStatus(model, mode, tokenCount, extraMessage = null) {
+    const loadingDiv = document.getElementById('llmLoadingMain');
+    if (!loadingDiv) return;
+    
+    const modeEmoji = mode === 'vision' ? '👁️' : '📝';
+    const modeText = mode === 'vision' ? 'Vision' : 'Text';
+    
+    // Update the loading message
+    let loadingP = loadingDiv.querySelector('p:not(.loading-timer)');
+    if (loadingP) {
+        if (extraMessage) {
+            loadingP.textContent = extraMessage;
+        } else {
+            loadingP.innerHTML = `${modeEmoji} <strong>${model}</strong> [${modeText}]<br><span style="color: var(--accent-primary);">${tokenCount} tokens</span>`;
+        }
+    }
+}
+
+function displayLlmResultMain(result, elapsedMs = null) {
     const placeholder = document.getElementById('llmPlaceholderMain');
     const resultDiv = document.getElementById('llmResultMain');
     const extractedFieldsDiv = document.getElementById('llmExtractedFieldsMain');
@@ -1830,6 +2545,8 @@ function displayLlmResultMain(result) {
     const confidenceNotes = document.getElementById('llmConfidenceNotesMain');
     const modelUsed = document.getElementById('llmModelUsedMain');
     const docType = document.getElementById('llmDocTypeMain');
+    const timingMeta = document.getElementById('llmTimingMeta');
+    const processingTime = document.getElementById('llmProcessingTime');
     
     placeholder.style.display = 'none';
     resultDiv.style.display = 'flex';
@@ -1846,27 +2563,33 @@ function displayLlmResultMain(result) {
             const fieldDiv = document.createElement('div');
             fieldDiv.className = 'field-item';
             
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'field-name';
+            nameDiv.textContent = key.replace(/_/g, ' ');
+            fieldDiv.appendChild(nameDiv);
+            
+            const valueDiv = document.createElement('div');
+            valueDiv.className = 'field-value';
+            
             if (Array.isArray(value)) {
-                fieldDiv.innerHTML = `<strong>${key}:</strong>`;
-                const listDiv = document.createElement('div');
-                listDiv.className = 'field-list';
+                valueDiv.className += ' list-value';
                 value.forEach((item, idx) => {
                     const itemDiv = document.createElement('div');
-                    itemDiv.className = 'field-list-item';
+                    itemDiv.className = 'list-item';
                     if (typeof item === 'object') {
-                        itemDiv.innerHTML = Object.entries(item)
-                            .map(([k, v]) => `<span><em>${k}:</em> ${v || '-'}</span>`)
-                            .join(' ');
+                        itemDiv.textContent = Object.entries(item)
+                            .map(([k, v]) => `${k}: ${v || '-'}`)
+                            .join(' | ');
                     } else {
                         itemDiv.textContent = item;
                     }
-                    listDiv.appendChild(itemDiv);
+                    valueDiv.appendChild(itemDiv);
                 });
-                fieldDiv.appendChild(listDiv);
             } else {
-                fieldDiv.innerHTML = `<strong>${key}:</strong> ${value || '-'}`;
+                valueDiv.textContent = value || '-';
             }
             
+            fieldDiv.appendChild(valueDiv);
             extractedFieldsDiv.appendChild(fieldDiv);
         }
     }
@@ -1886,6 +2609,26 @@ function displayLlmResultMain(result) {
     const visionTag = result.vision_used ? ' [Vision]' : '';
     modelUsed.textContent = (result.model || 'Unknown') + visionTag;
     docType.textContent = result.document_type_name || result.document_type || 'Unknown';
+    
+    // Display processing time
+    if (elapsedMs !== null && timingMeta && processingTime) {
+        timingMeta.style.display = 'flex';
+        processingTime.textContent = formatDuration(elapsedMs);
+    }
+    
+    // Display token count
+    const tokensMeta = document.getElementById('llmTokensMeta');
+    const tokenCountEl = document.getElementById('llmTokenCount');
+    if (tokensMeta && tokenCountEl && (result.token_count || state.llmTokenCount)) {
+        tokensMeta.style.display = 'flex';
+        tokenCountEl.textContent = result.token_count || state.llmTokenCount || 0;
+    }
+    
+    // Update vision indicator in toolbar
+    const visionIndicator = document.getElementById('llmVisionIndicator');
+    if (visionIndicator) {
+        visionIndicator.style.display = result.vision_used ? 'inline' : 'none';
+    }
 }
 
 async function loadSchemaList() {

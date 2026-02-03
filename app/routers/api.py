@@ -565,6 +565,230 @@ async def llm_process_text(request: LLMProcessRequest):
     return result
 
 
+@router.post("/llm/process/stream")
+async def llm_process_text_stream(request: LLMProcessRequest):
+    """
+    Process OCR text using LLM with streaming progress updates.
+    
+    Returns Server-Sent Events with:
+    - status: "started", "generating", "processing", "complete", "error"
+    - mode: "vision" or "text"
+    - model: Model name being used
+    - token_count: Running count of generated tokens
+    - tokens: Individual tokens as they arrive
+    - result: Final structured result (when complete)
+    """
+    from app.services.llm_service import GEMINI_AVAILABLE, get_gemini_processor, encode_image_to_base64
+    
+    async def generate_stream() -> AsyncGenerator[str, None]:
+        nonlocal request
+        
+        print(f"[LLM Stream] Starting stream for model: {request.model}, image_id: {request.image_id}")
+        
+        # Load image bytes if image_id is provided
+        image_bytes = None
+        if request.image_id and request.use_vision:
+            image_path = None
+            
+            if request.image_id in images_store:
+                image_path = images_store[request.image_id]["path"]
+            else:
+                fallback_path = os.path.join(UPLOAD_DIR, f"{request.image_id}.png")
+                if os.path.exists(fallback_path):
+                    image_path = fallback_path
+                    images_store[request.image_id] = {"path": fallback_path, "filename": f"{request.image_id}.png"}
+            
+            if image_path:
+                try:
+                    with open(image_path, "rb") as f:
+                        image_bytes = f.read()
+                    print(f"[LLM Stream] Loaded image: {len(image_bytes)} bytes")
+                except Exception as e:
+                    print(f"[LLM Stream] ERROR loading image: {e}")
+                    yield f"data: {json.dumps({'status': 'error', 'error': f'Could not load image: {e}'})}\n\n"
+                    return
+        
+        # Determine model and mode
+        model_id = request.model
+        model_name = request.model or "auto"
+        
+        # Check for Gemini
+        if request.model and request.model.lower().startswith("gemini"):
+            mode = "vision" if image_bytes else "text"
+            print(f"[LLM Stream] Using Gemini in {mode} mode")
+            yield f"data: {json.dumps({'status': 'started', 'mode': mode, 'model': 'Gemini 2.5 Pro'})}\n\n"
+            
+            if not GEMINI_AVAILABLE:
+                yield f"data: {json.dumps({'status': 'error', 'error': 'Gemini API key not configured'})}\n\n"
+                return
+            
+            processor = get_gemini_processor()
+            result = await processor.process_text(request.text, request.document_type, image_bytes)
+            yield f"data: {json.dumps({'status': 'complete', 'result': result})}\n\n"
+            return
+        
+        # Ollama processing with streaming
+        client = get_ollama_client()
+        
+        if not await client.is_available():
+            print("[LLM Stream] ERROR: Ollama not available")
+            yield f"data: {json.dumps({'status': 'error', 'error': 'Ollama service not available'})}\n\n"
+            return
+        
+        # Resolve model
+        model = None
+        available_models = await client.list_models()
+        
+        if request.model:
+            for m in LLMModel:
+                if m.value.lower() == request.model.lower():
+                    model = m
+                    model_id = m.value
+                    model_name = m.display_name
+                    break
+            if model is None:
+                model_id = request.model
+                model_name = request.model
+        else:
+            # Auto-select
+            has_image = image_bytes is not None
+            selected = select_optimal_model(
+                available_models,
+                has_image=has_image,
+                document_type=request.document_type,
+                prefer_vision=request.use_vision
+            )
+            if selected:
+                model_id = selected
+                for m in LLMModel:
+                    if m.value == selected:
+                        model_name = m.display_name
+                        model = m
+                        break
+                if model is None:
+                    model_name = selected
+        
+        # Determine mode
+        is_vision = image_bytes is not None and is_vision_model(model_id)
+        mode = "vision" if is_vision else "text"
+        
+        print(f"[LLM Stream] Mode: {mode.upper()}, Model: {model_name}")
+        yield f"data: {json.dumps({'status': 'started', 'mode': mode, 'model': model_name, 'model_id': model_id})}\n\n"
+        
+        # Build prompt using the processor logic
+        from app.services.llm_service import get_llm_processor
+        from app.config.document_schemas import get_schema
+        
+        processor = get_llm_processor()
+        
+        # Get schema
+        doc_type = request.document_type or "unknown"
+        schema = get_schema(doc_type)
+        print(f"[LLM Stream] Document type: {doc_type}, Schema: {schema.display_name if schema else 'None'}")
+        
+        # Build extraction prompt
+        if is_vision:
+            base64_image = encode_image_to_base64(image_bytes)
+            images = [base64_image]
+            prompt = processor._build_vision_prompt(request.text, schema)
+            system_prompt = processor.VISION_SYSTEM_PROMPT
+        else:
+            images = None
+            prompt = processor._build_text_prompt(request.text, schema)
+            system_prompt = processor.TEXT_SYSTEM_PROMPT
+        
+        print(f"[LLM Stream] Prompt length: {len(prompt)} chars")
+        
+        # Stream generation
+        token_count = 0
+        full_response = ""
+        
+        try:
+            payload = {
+                "model": model_id,
+                "prompt": prompt,
+                "stream": True,
+                "options": {
+                    "temperature": client.config.temperature,
+                    "num_predict": client.config.max_tokens,
+                }
+            }
+            if system_prompt:
+                payload["system"] = system_prompt
+            if images:
+                payload["images"] = images
+            
+            print(f"[LLM Stream] Starting generation...")
+            
+            async with httpx.AsyncClient(timeout=client.config.timeout) as http_client:
+                async with http_client.stream(
+                    "POST",
+                    f"{client.base_url}/api/generate",
+                    json=payload
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        print(f"[LLM Stream] ERROR: {response.status_code} - {error_text[:200]}")
+                        yield f"data: {json.dumps({'status': 'error', 'error': f'LLM error: {response.status_code}'})}\n\n"
+                        return
+                    
+                    print("[LLM Stream] Response: ", end="", flush=True)
+                    async for line in response.aiter_lines():
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                token = data.get("response", "")
+                                if token:
+                                    token_count += 1
+                                    full_response += token
+                                    print(token, end="", flush=True)
+                                    
+                                    # Send token update every 5 tokens or special chars
+                                    if token_count % 5 == 0 or token in ['\n', '.', ',', ':', '{', '}', '[', ']']:
+                                        yield f"data: {json.dumps({'status': 'generating', 'token_count': token_count, 'tokens': token})}\n\n"
+                                
+                                if data.get("done"):
+                                    break
+                            except json.JSONDecodeError:
+                                pass
+            
+            print()  # Newline after streaming
+            print(f"[LLM Stream] Generation complete ({len(full_response)} chars, {token_count} tokens)")
+            
+            # Parse the response
+            yield f"data: {json.dumps({'status': 'processing', 'token_count': token_count, 'message': 'Parsing response...'})}\n\n"
+            
+            # Parse JSON from response using correct method name
+            parsed_result = processor._parse_json_response(full_response, schema)
+            
+            if parsed_result is None:
+                parsed_result = {"extracted_fields": {}, "corrected_text": request.text}
+            
+            # Build final result
+            result = {
+                "success": True,
+                "document_type": doc_type,
+                "document_type_name": schema.display_name if schema else doc_type,
+                "extracted_fields": parsed_result.get("extracted_fields", {}),
+                "corrected_text": parsed_result.get("corrected_text", request.text),
+                "confidence_notes": parsed_result.get("confidence_notes", ""),
+                "model": model_name,
+                "vision_used": is_vision,
+                "token_count": token_count
+            }
+            
+            print(f"[LLM Stream] Sending complete result")
+            yield f"data: {json.dumps({'status': 'complete', 'result': result, 'token_count': token_count})}\n\n"
+            
+        except Exception as e:
+            print(f"[LLM Stream] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(generate_stream(), media_type="text/event-stream")
+
+
 @router.post("/llm/denoise")
 async def llm_denoise_text(request: LLMProcessRequest):
     """Quick denoising of OCR text - removes artifacts and fixes obvious errors.
