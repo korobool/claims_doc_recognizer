@@ -1381,9 +1381,11 @@ function initSchemaManagement() {
     // LLM controls in Settings tab
     const pullModelBtn = document.getElementById('pullModelBtn');
     const llmModelSelect = document.getElementById('llmModelSelect');
+    const startOllamaBtn = document.getElementById('startOllamaBtn');
     
     if (pullModelBtn) pullModelBtn.addEventListener('click', pullSelectedModel);
     if (llmModelSelect) llmModelSelect.addEventListener('change', handleModelSelect);
+    if (startOllamaBtn) startOllamaBtn.addEventListener('click', startOllama);
     
     // Process button in LLM Results tab
     const processLlmBtnMain = document.getElementById('processLlmBtnMain');
@@ -1509,6 +1511,9 @@ function updateSettingsUI() {
         }
         
         handleModelSelect();
+        // Hide start button when online
+        const startBtn = document.getElementById('startOllamaBtn');
+        if (startBtn) startBtn.style.display = 'none';
     } else {
         ollamaStatus.textContent = '🔴';
         ollamaStatusText.textContent = 'Ollama Offline';
@@ -1517,6 +1522,10 @@ function updateSettingsUI() {
         modelSelect.innerHTML = '<option value="">Ollama offline</option>';
         modelSelect.disabled = true;
         pullBtn.disabled = true;
+        
+        // Show start button when offline
+        const startBtn = document.getElementById('startOllamaBtn');
+        if (startBtn) startBtn.style.display = 'inline-flex';
     }
 }
 
@@ -1536,6 +1545,49 @@ function handleModelSelect() {
     
     // Update LLM Results tab process button
     updateLlmResultsTab();
+}
+
+async function startOllama() {
+    const startBtn = document.getElementById('startOllamaBtn');
+    const ollamaStatusText = document.getElementById('ollamaStatusTextSettings');
+    
+    if (!startBtn) return;
+    
+    // Disable button and show loading state
+    startBtn.disabled = true;
+    startBtn.textContent = '⏳ Starting...';
+    if (ollamaStatusText) ollamaStatusText.textContent = 'Starting Ollama...';
+    
+    try {
+        const response = await fetch('/api/llm/start-ollama', { method: 'POST' });
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.detail || 'Failed to start Ollama');
+        }
+        
+        if (result.status === 'started' || result.status === 'already_running') {
+            // Refresh LLM status
+            await checkLlmStatus();
+            updateSettingsUI();
+            updateLlmResultsTab();
+        } else if (result.status === 'starting') {
+            // Poll for status
+            if (ollamaStatusText) ollamaStatusText.textContent = 'Ollama starting...';
+            setTimeout(async () => {
+                await checkLlmStatus();
+                updateSettingsUI();
+                updateLlmResultsTab();
+            }, 3000);
+        }
+    } catch (error) {
+        console.error('Failed to start Ollama:', error);
+        alert('Failed to start Ollama: ' + error.message);
+        if (ollamaStatusText) ollamaStatusText.textContent = 'Ollama Offline';
+    } finally {
+        startBtn.disabled = false;
+        startBtn.textContent = '▶️ Start Ollama';
+    }
 }
 
 function updateLlmResultsTab() {

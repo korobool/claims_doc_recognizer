@@ -768,6 +768,16 @@ body {
     opacity: 0.5;
 }
 
+.btn-start-ollama {
+    background: #2d5a27;
+    color: #fff;
+    border: 1px solid #3d7a37;
+}
+
+.btn-start-ollama:hover:not(:disabled) {
+    background: #3d7a37;
+}
+
 .llm-result-container {
     flex: 1;
     overflow-y: auto;

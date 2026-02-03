@@ -254,6 +254,80 @@ async def llm_status():
     )
 
 
+@router.post("/llm/start-ollama")
+async def start_ollama():
+    """Start the Ollama service."""
+    import subprocess
+    import platform
+    import shutil
+    
+    # Check if Ollama is already running
+    client = get_ollama_client()
+    if await client.is_available():
+        return {"status": "already_running", "message": "Ollama is already running"}
+    
+    # Find ollama executable
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        # Check common locations
+        common_paths = [
+            "/usr/local/bin/ollama",
+            "/opt/homebrew/bin/ollama",
+            os.path.expanduser("~/.ollama/bin/ollama"),
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                ollama_path = path
+                break
+    
+    if not ollama_path:
+        raise HTTPException(
+            status_code=404, 
+            detail="Ollama not found. Please install Ollama first: https://ollama.com"
+        )
+    
+    try:
+        # Start Ollama serve in background
+        system = platform.system()
+        if system == "Darwin":  # macOS
+            # Use open command to start Ollama app if installed, otherwise serve
+            subprocess.Popen(
+                [ollama_path, "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+        elif system == "Linux":
+            subprocess.Popen(
+                [ollama_path, "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+        elif system == "Windows":
+            subprocess.Popen(
+                [ollama_path, "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        else:
+            raise HTTPException(status_code=500, detail=f"Unsupported platform: {system}")
+        
+        # Wait a moment for Ollama to start
+        import asyncio
+        await asyncio.sleep(2)
+        
+        # Check if it started successfully
+        if await client.is_available():
+            return {"status": "started", "message": "Ollama started successfully"}
+        else:
+            return {"status": "starting", "message": "Ollama is starting, please wait..."}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start Ollama: {str(e)}")
+
+
 @router.post("/llm/pull/{model_id}")
 async def llm_pull_model(model_id: str):
     """Pull a model from Ollama registry if not available."""

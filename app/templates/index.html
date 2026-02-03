@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Recognition System</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=21">
+    <link rel="stylesheet" href="/static/css/style.css?v=22">
 </head>
 <body>
     <div class="container">
@@ -168,6 +168,9 @@
                                     <span class="status-indicator" id="ollamaStatusSettings">⚪</span>
                                     <span id="ollamaStatusTextSettings">Checking Ollama...</span>
                                 </div>
+                                <button class="btn btn-small btn-start-ollama" id="startOllamaBtn" style="display: none;" title="Start Ollama service">
+                                    ▶️ Start Ollama
+                                </button>
                                 <div class="llm-acceleration" id="llmAccelerationSettings">
                                     <span class="accel-icon" id="accelIconSettings">⚡</span>
                                     <span id="accelTextSettings">Checking acceleration...</span>
@@ -276,6 +279,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=21"></script>
+    <script src="/static/js/app.js?v=22"></script>
 </body>
 </html>
