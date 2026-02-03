@@ -540,7 +540,17 @@ class LLMPostProcessor:
     
     # System prompt for vision-enabled models (concise, focused on image)
     VISION_SYSTEM_PROMPT = """You are a medical document processor with vision capabilities.
-You can see the document image directly. Use visual information to verify and correct OCR text.
+
+IMPORTANT: You receive TWO representations of the SAME document:
+1. The document IMAGE (what you can see)
+2. OCR-extracted TEXT (may contain errors)
+
+These are NOT separate documents - they represent the SAME content. Your task is to:
+- Use the image as the ground truth for verification
+- Use OCR text as a helpful starting point (but it may have errors)
+- Produce ONE corrected result by merging both sources intelligently
+- Do NOT duplicate items that appear in both representations
+
 Medical terms, drug names, and dosages must be 100% accurate.
 Always respond with valid JSON only."""
 
@@ -601,13 +611,19 @@ Always respond with valid JSON only."""
 
 EXTRACT THESE FIELDS: {field_list}
 
-OCR TEXT (verify against image):
+=== OCR TEXT (noisy, may contain errors) ===
 {text}
+=== END OCR TEXT ===
 
-Look at the document image to verify text accuracy. Medical terms and dosages must be exact.
+INSTRUCTIONS:
+1. The IMAGE and OCR TEXT above represent the SAME document
+2. Use the image as ground truth - OCR text is just a noisy reference
+3. Fix OCR errors by comparing text against what you see in the image
+4. Extract fields ONCE - do not duplicate items from both sources
+5. For medications: verify drug names and dosages against the image
 
 Return JSON only:
-{{"corrected_text": "...", "extracted_fields": {example_json}}}"""
+{{"corrected_text": "cleaned text from image", "extracted_fields": {example_json}}}"""
     
     def _build_text_prompt(self, text: str, schema: DocumentSchema) -> str:
         """Build a detailed prompt for text-only models."""
@@ -1031,13 +1047,19 @@ class GeminiPostProcessor:
 
 EXTRACT THESE FIELDS: {field_list}
 
-OCR TEXT (verify against image):
+=== OCR TEXT (noisy, may contain errors) ===
 {text}
+=== END OCR TEXT ===
 
-Look at the document image to verify text accuracy. Medical terms and dosages must be exact.
+INSTRUCTIONS:
+1. The IMAGE and OCR TEXT above represent the SAME document
+2. Use the image as ground truth - OCR text is just a noisy reference
+3. Fix OCR errors by comparing text against what you see in the image
+4. Extract fields ONCE - do not duplicate items from both sources
+5. For medications: verify drug names and dosages against the image
 
 Return JSON only:
-{{"corrected_text": "...", "extracted_fields": {example_json}}}"""
+{{"corrected_text": "cleaned text from image", "extracted_fields": {example_json}}}"""
         else:
             # More detailed prompt for text-only
             field_descriptions = []
