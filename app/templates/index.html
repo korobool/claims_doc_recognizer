@@ -4,67 +4,88 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Recognition System</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=22">
+    <link rel="stylesheet" href="/static/css/style.css?v=28">
 </head>
 <body>
     <div class="container">
         <!-- Left panel: upload and image list -->
         <aside class="sidebar left-panel">
-            <h2>Images</h2>
-            <div class="upload-area" id="uploadArea">
-                <input type="file" id="fileInput" multiple accept="image/*" hidden>
-                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                    📁 Upload
-                </button>
-                <p class="hint">or drag and drop files here</p>
-            </div>
-            <div class="image-list" id="imageList">
-                <!-- List of uploaded images -->
+            <div class="left-panel-content">
+                <div class="panel-header">
+                    <h2>Document Library</h2>
+                </div>
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="fileInput" multiple accept="image/*" hidden>
+                    <button class="btn btn-primary btn-upload" onclick="document.getElementById('fileInput').click()">
+                        <span class="btn-icon">+</span> Upload Documents
+                    </button>
+                    <p class="hint">or drag and drop files here</p>
+                </div>
+                <div class="image-list" id="imageList">
+                    <!-- List of uploaded images -->
+                </div>
             </div>
         </aside>
 
         <!-- Center panel: view and process -->
         <main class="main-panel">
-            <div class="toolbar">
-                <button class="btn" id="normalizeBtn" disabled>
-                    🔄 Normalize
-                </button>
-                <button class="btn btn-primary" id="recognizeBtn" disabled>
-                    🔍 Recognize
-                </button>
-                <button class="btn" id="addBboxBtn" disabled>
-                    ✏️ Add BBox
-                </button>
-            </div>
             <!-- Main area tabs -->
             <div class="main-tabs">
-                <button class="main-tab active" data-tab="viewer" id="viewerTabBtn">📄 Document Viewer</button>
-                <button class="main-tab" data-tab="llm" id="llmTabBtn">🤖 LLM Results</button>
-                <button class="main-tab" data-tab="schemas" id="schemasTabBtn">📋 Schema Templates</button>
-                <button class="main-tab" data-tab="settings" id="settingsTabBtn">⚙️ Settings</button>
+                <button class="main-tab active" data-tab="viewer" id="viewerTabBtn">
+                    <span class="tab-icon">📄</span> Document Viewer
+                </button>
+                <button class="main-tab" data-tab="llm" id="llmTabBtn">
+                    <span class="tab-icon">🤖</span> LLM Results
+                </button>
+                <button class="main-tab" data-tab="schemas" id="schemasTabBtn">
+                    <span class="tab-icon">📋</span> Templates
+                </button>
+                <button class="main-tab" data-tab="settings" id="settingsTabBtn">
+                    <span class="tab-icon">⚙️</span> Settings
+                </button>
             </div>
             
             <!-- Document Viewer Tab -->
             <div class="main-tab-content active" id="viewerTab">
-            <div class="image-viewer" id="imageViewer">
-                <div class="placeholder" id="placeholder">
-                    <p>Select an image to view</p>
+                <!-- Viewer Toolbar - context-specific actions -->
+                <div class="tab-toolbar" id="viewerToolbar">
+                    <div class="toolbar-group">
+                        <button class="btn btn-toolbar" id="normalizeBtn" disabled title="Auto-rotate and deskew">
+                            <span class="btn-icon">🔄</span> Normalize
+                        </button>
+                        <button class="btn btn-toolbar btn-primary" id="recognizeBtn" disabled title="Run OCR recognition">
+                            <span class="btn-icon">🔍</span> Recognize
+                        </button>
+                        <button class="btn btn-toolbar" id="addBboxBtn" disabled title="Draw custom text region">
+                            <span class="btn-icon">✏️</span> Add Region
+                        </button>
+                    </div>
+                    <div class="toolbar-separator"></div>
+                    <div class="toolbar-group zoom-toolbar">
+                        <button class="btn btn-icon-only" id="zoomOutBtn" title="Zoom out (Ctrl+-)">−</button>
+                        <input type="range" id="zoomSlider" min="25" max="300" value="100" step="5">
+                        <button class="btn btn-icon-only" id="zoomInBtn" title="Zoom in (Ctrl++)">+</button>
+                        <span class="zoom-value" id="zoomValue">100%</span>
+                    </div>
                 </div>
-                <div class="zoom-wrapper" id="zoomWrapper" style="display: none;">
-                    <div class="image-container" id="imageContainer">
-                        <img id="mainImage" src="" alt="Document">
-                        <div class="text-overlay" id="textOverlay">
-                            <!-- Editable text blocks -->
+                
+                <div class="image-viewer" id="imageViewer">
+                    <div class="placeholder" id="placeholder">
+                        <div class="placeholder-content">
+                            <span class="placeholder-icon">📄</span>
+                            <p class="placeholder-text">Select a document to view</p>
+                            <p class="placeholder-hint">Upload documents using the panel on the left</p>
+                        </div>
+                    </div>
+                    <div class="zoom-wrapper" id="zoomWrapper" style="display: none;">
+                        <div class="image-container" id="imageContainer">
+                            <img id="mainImage" src="" alt="Document">
+                            <div class="text-overlay" id="textOverlay">
+                                <!-- Editable text blocks -->
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="zoom-controls" id="zoomControls" style="display: none;">
-                <button class="zoom-btn" id="zoomOutBtn" title="Zoom out (Ctrl+-)">−</button>
-                <input type="range" id="zoomSlider" min="25" max="300" value="100" step="5">
-                <button class="zoom-btn" id="zoomInBtn" title="Zoom in (Ctrl++)">+</button>
-                <span class="zoom-value" id="zoomValue">100%</span>
-            </div>
             </div><!-- End viewerTab -->
             
             <!-- Schema Templates Tab -->
@@ -119,39 +140,72 @@
             
             <!-- LLM Results Tab -->
             <div class="main-tab-content" id="llmMainTab">
-                <div class="llm-results-container">
-                    <div class="llm-results-header">
-                        <button class="btn btn-primary" id="processLlmBtnMain" disabled>
-                            🔄 Process with LLM
+                <!-- LLM Toolbar -->
+                <div class="tab-toolbar" id="llmToolbar">
+                    <div class="toolbar-group">
+                        <button class="btn btn-toolbar btn-primary" id="processLlmBtnMain" disabled>
+                            <span class="btn-icon">🤖</span> Process with LLM
                         </button>
-                        <span class="llm-model-info">Using: <strong id="llmSelectedModelDisplay">No model selected</strong></span>
                     </div>
+                    <div class="toolbar-info">
+                        <span class="model-label">Model:</span>
+                        <strong id="llmSelectedModelDisplay">No model selected</strong>
+                        <span class="vision-indicator" id="llmVisionIndicator" style="display: none;">👁️</span>
+                    </div>
+                </div>
+                
+                <div class="llm-results-container">
                     <div class="llm-result-panel">
                         <div class="llm-placeholder" id="llmPlaceholderMain">
-                            <p>Run OCR first, then click "Process with LLM" to enhance results</p>
-                            <p class="hint">Configure LLM model in Settings tab</p>
+                            <div class="placeholder-content">
+                                <span class="placeholder-icon">🤖</span>
+                                <p class="placeholder-text">Ready to enhance OCR results</p>
+                                <p class="placeholder-hint">Run OCR first, then click "Process with LLM" to extract structured data</p>
+                            </div>
                         </div>
                         <div class="llm-result" id="llmResultMain" style="display: none;">
                             <div class="llm-section" id="llmExtractedFieldsSectionMain">
-                                <h4>📋 Extracted Fields <span class="doc-type-badge" id="llmDocTypeBadgeMain"></span></h4>
+                                <div class="section-header">
+                                    <h4>📋 Extracted Fields</h4>
+                                    <span class="doc-type-badge" id="llmDocTypeBadgeMain"></span>
+                                </div>
                                 <div class="extracted-fields" id="llmExtractedFieldsMain"></div>
                             </div>
                             <div class="llm-section">
-                                <h4>📝 Corrected Text</h4>
+                                <div class="section-header">
+                                    <h4>📝 Corrected Text</h4>
+                                </div>
                                 <div class="llm-text" id="llmEnhancedTextMain"></div>
                             </div>
                             <div class="llm-section" id="llmConfidenceSectionMain" style="display: none;">
-                                <h4>ℹ️ Notes</h4>
+                                <div class="section-header">
+                                    <h4>ℹ️ Notes</h4>
+                                </div>
                                 <div class="llm-notes" id="llmConfidenceNotesMain"></div>
                             </div>
                             <div class="llm-meta">
-                                <span>Model: <strong id="llmModelUsedMain">-</strong></span>
-                                <span class="llm-doc-type">Document: <strong id="llmDocTypeMain">-</strong></span>
+                                <div class="meta-item">
+                                    <span class="meta-label">Model:</span>
+                                    <strong id="llmModelUsedMain">-</strong>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-label">Document:</span>
+                                    <strong id="llmDocTypeMain">-</strong>
+                                </div>
+                                <div class="meta-item" id="llmTimingMeta" style="display: none;">
+                                    <span class="meta-label">Time:</span>
+                                    <strong id="llmProcessingTime">-</strong>
+                                </div>
+                                <div class="meta-item" id="llmTokensMeta" style="display: none;">
+                                    <span class="meta-label">Tokens:</span>
+                                    <strong id="llmTokenCount">-</strong>
+                                </div>
                             </div>
                         </div>
                         <div class="llm-loading" id="llmLoadingMain" style="display: none;">
                             <div class="spinner"></div>
-                            <p>Processing with LLM...</p>
+                            <p>Connecting to LLM...</p>
+                            <p class="loading-timer" id="llmLoadingTimer">0.0s</p>
                         </div>
                     </div>
                 </div>
@@ -214,83 +268,166 @@
             </div><!-- End settingsTab -->
         </main>
 
-        <!-- Right panel: Results -->
+        <!-- Right panel: Results & Activity -->
         <aside class="sidebar right-panel">
-            <div class="device-info-container" id="deviceInfoContainer">
-                <div class="device-info-header" onclick="toggleDeviceInfo()">
-                    <span class="device-info-icon">🖥️</span>
-                    <span class="device-info-title">Acceleration</span>
-                    <span class="device-info-status" id="deviceInfoStatus">Loading...</span>
-                    <span class="device-info-toggle" id="deviceInfoToggle">▼</span>
-                </div>
-                <div class="device-info-details" id="deviceInfoDetails" style="display: none;">
-                    <div class="device-info-row">
-                        <span class="device-label">PyTorch:</span>
-                        <span class="device-value" id="pytorchVersion">-</span>
-                    </div>
-                    <div class="device-info-row" id="pytorchCudaRow">
-                        <span class="device-label">CUDA Build:</span>
-                        <span class="device-value" id="pytorchCudaBuild">-</span>
-                    </div>
-                    <div class="device-info-separator"></div>
-                    <div class="device-info-row acceleration-row">
-                        <span class="device-label">Acceleration:</span>
-                        <span class="device-value" id="accelerationType">-</span>
-                    </div>
-                    <div class="device-info-row">
-                        <span class="device-label">Device:</span>
-                        <span class="device-value" id="selectedDevice">-</span>
-                    </div>
-                    <div class="device-info-row" id="cudaVersionRow" style="display: none;">
-                        <span class="device-label">CUDA Version:</span>
-                        <span class="device-value" id="cudaVersion">-</span>
-                    </div>
-                    <div class="device-info-row" id="gpuCountRow" style="display: none;">
-                        <span class="device-label">GPU Count:</span>
-                        <span class="device-value" id="gpuCount">-</span>
-                    </div>
-                    <div class="device-info-row" id="gpuNameRow" style="display: none;">
-                        <span class="device-label">GPU:</span>
-                        <span class="device-value" id="gpuName">-</span>
-                    </div>
-                    <div class="device-info-row" id="gpuMemoryRow" style="display: none;">
-                        <span class="device-label">GPU Memory:</span>
-                        <span class="device-value" id="gpuMemory">-</span>
-                    </div>
-                    <div class="device-info-separator"></div>
-                    <div class="device-info-row">
-                        <span class="device-label">Surya OCR:</span>
-                        <span class="device-value" id="suryaDevice">Pending</span>
-                    </div>
-                    <div class="device-info-row">
-                        <span class="device-label">CLIP:</span>
-                        <span class="device-value" id="clipDevice">Pending</span>
-                    </div>
-                    <div class="device-info-note" id="deviceInfoNote">Models load on first recognition</div>
-                </div>
-            </div>
-            <div class="document-class-container" id="documentClassContainer" style="display: none;">
-                <span class="document-class-label">Document Type:</span>
-                <span class="document-class-value" id="documentClassValue">-</span>
-                <span class="document-class-confidence" id="documentClassConfidence"></span>
+            <div class="panel-header">
+                <h2>Output & Activity</h2>
             </div>
             
-            <!-- JSON Results -->
-            <h3 class="results-header">📄 OCR Results</h3>
-            <div class="json-container">
-                <pre id="jsonOutput" contenteditable="false">
-{
+            <!-- Right Panel Tabs -->
+            <div class="right-panel-tabs">
+                <button class="rp-tab active" data-rp-tab="ocr" id="rpOcrTabBtn">
+                    <span class="rp-tab-icon">📝</span> OCR
+                </button>
+                <button class="rp-tab" data-rp-tab="activity" id="rpActivityTabBtn">
+                    <span class="rp-tab-icon">📋</span> Activity
+                    <span class="activity-indicator" id="activityIndicator"></span>
+                </button>
+                <button class="rp-tab" data-rp-tab="llm-raw" id="rpLlmRawTabBtn">
+                    <span class="rp-tab-icon">🤖</span> LLM Raw
+                    <span class="llm-streaming-indicator" id="llmStreamingIndicator"></span>
+                </button>
+            </div>
+            
+            <!-- OCR Tab Content -->
+            <div class="rp-tab-content active" id="rpOcrTab">
+                <div class="device-info-container" id="deviceInfoContainer">
+                    <div class="device-info-header" onclick="toggleDeviceInfo()">
+                        <span class="device-info-icon">⚡</span>
+                        <span class="device-info-title">System</span>
+                        <span class="device-info-status" id="deviceInfoStatus">Loading...</span>
+                        <span class="device-info-toggle" id="deviceInfoToggle">▼</span>
+                    </div>
+                    <div class="device-info-details" id="deviceInfoDetails" style="display: none;">
+                        <div class="device-info-row">
+                            <span class="device-label">PyTorch:</span>
+                            <span class="device-value" id="pytorchVersion">-</span>
+                        </div>
+                        <div class="device-info-row" id="pytorchCudaRow">
+                            <span class="device-label">CUDA Build:</span>
+                            <span class="device-value" id="pytorchCudaBuild">-</span>
+                        </div>
+                        <div class="device-info-separator"></div>
+                        <div class="device-info-row acceleration-row">
+                            <span class="device-label">Acceleration:</span>
+                            <span class="device-value" id="accelerationType">-</span>
+                        </div>
+                        <div class="device-info-row">
+                            <span class="device-label">Device:</span>
+                            <span class="device-value" id="selectedDevice">-</span>
+                        </div>
+                        <div class="device-info-row" id="cudaVersionRow" style="display: none;">
+                            <span class="device-label">CUDA Version:</span>
+                            <span class="device-value" id="cudaVersion">-</span>
+                        </div>
+                        <div class="device-info-row" id="gpuCountRow" style="display: none;">
+                            <span class="device-label">GPU Count:</span>
+                            <span class="device-value" id="gpuCount">-</span>
+                        </div>
+                        <div class="device-info-row" id="gpuNameRow" style="display: none;">
+                            <span class="device-label">GPU:</span>
+                            <span class="device-value" id="gpuName">-</span>
+                        </div>
+                        <div class="device-info-row" id="gpuMemoryRow" style="display: none;">
+                            <span class="device-label">GPU Memory:</span>
+                            <span class="device-value" id="gpuMemory">-</span>
+                        </div>
+                        <div class="device-info-separator"></div>
+                        <div class="device-info-row">
+                            <span class="device-label">Surya OCR:</span>
+                            <span class="device-value" id="suryaDevice">Pending</span>
+                        </div>
+                        <div class="device-info-row">
+                            <span class="device-label">SigLIP:</span>
+                            <span class="device-value" id="clipDevice">Pending</span>
+                        </div>
+                        <div class="device-info-note" id="deviceInfoNote">Models load on first recognition</div>
+                    </div>
+                </div>
+                
+                <div class="document-class-container" id="documentClassContainer" style="display: none;">
+                    <span class="document-class-label">Document Type:</span>
+                    <span class="document-class-value" id="documentClassValue">-</span>
+                    <span class="document-class-confidence" id="documentClassConfidence"></span>
+                </div>
+                
+                <!-- OCR Timing Info -->
+                <div class="timing-info" id="ocrTimingInfo" style="display: none;">
+                    <span class="timing-label">OCR completed in</span>
+                    <span class="timing-value" id="ocrTimingValue">-</span>
+                </div>
+                
+                <!-- JSON Results -->
+                <div class="results-section">
+                    <div class="results-header-row">
+                        <h3 class="results-header">Raw OCR Output</h3>
+                        <span class="line-count" id="lineCount">0 lines</span>
+                    </div>
+                    <div class="json-container">
+                        <pre id="jsonOutput" contenteditable="false">{
   "text_lines": [],
   "image_bbox": []
 }</pre>
+                    </div>
+                </div>
             </div>
             
-            <button class="btn btn-success" id="saveBtn" disabled>
-                💾 Save
-            </button>
+            <!-- Activity Log Tab Content -->
+            <div class="rp-tab-content" id="rpActivityTab">
+                <div class="activity-log-container">
+                    <div class="activity-log-header">
+                        <span class="activity-title">Activity Log</span>
+                        <button class="btn btn-icon-only btn-small" id="clearActivityBtn" title="Clear log">🗑️</button>
+                    </div>
+                    <div class="activity-log-entries" id="activityLogEntries">
+                        <div class="log-entry log-info">
+                            <span class="log-time">--:--:--</span>
+                            <span class="log-message">System ready. Upload an image to begin.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- LLM Raw Output Tab Content -->
+            <div class="rp-tab-content" id="rpLlmRawTab">
+                <div class="llm-raw-container">
+                    <div class="llm-raw-header">
+                        <div class="llm-raw-status" id="llmRawStatus">
+                            <span class="status-dot idle" id="llmStatusDot"></span>
+                            <span class="status-text" id="llmStatusText">Idle</span>
+                        </div>
+                        <div class="llm-raw-meta">
+                            <span class="meta-badge" id="llmModeBadge" style="display: none;">Text</span>
+                            <span class="meta-badge" id="llmModelBadge" style="display: none;">Model</span>
+                        </div>
+                    </div>
+                    <div class="llm-raw-stats" id="llmRawStats" style="display: none;">
+                        <div class="stat-item">
+                            <span class="stat-label">Tokens:</span>
+                            <span class="stat-value" id="llmRawTokens">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Time:</span>
+                            <span class="stat-value" id="llmRawTime">0.0s</span>
+                        </div>
+                    </div>
+                    <div class="llm-raw-output" id="llmRawOutput">
+                        <div class="llm-raw-placeholder">
+                            <span class="placeholder-icon">🤖</span>
+                            <p>LLM output will appear here during processing</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel-footer">
+                <button class="btn btn-success" id="saveBtn" disabled>
+                    <span class="btn-icon">💾</span> Export JSON
+                </button>
+            </div>
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=22"></script>
+    <script src="/static/js/app.js?v=28"></script>
 </body>
 </html>
