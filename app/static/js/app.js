@@ -1235,14 +1235,19 @@ async function processWithLlm() {
     showLlmLoading(true);
     
     try {
+        // Include image_id for vision-enabled models
+        const requestBody = {
+            text: fullText,
+            model: modelId,
+            document_type: docType,
+            image_id: state.selectedImageId || null,  // Pass image for vision models
+            use_vision: true  // Enable vision processing when available
+        };
+        
         const response = await fetch('/api/llm/process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text: fullText,
-                model: modelId,
-                document_type: docType
-            })
+            body: JSON.stringify(requestBody)
         });
         
         if (!response.ok) {
@@ -1350,9 +1355,10 @@ function displayLlmResult(result) {
         if (confidenceSection) confidenceSection.style.display = 'none';
     }
     
-    // Display model used
+    // Display model used (with vision indicator)
     if (elements.llmModelUsed) {
-        elements.llmModelUsed.textContent = result.model || 'Unknown';
+        const visionTag = result.vision_used ? ' [Vision]' : '';
+        elements.llmModelUsed.textContent = (result.model || 'Unknown') + visionTag;
     }
     
     // Display document type
@@ -1715,14 +1721,19 @@ async function processWithLlmMain() {
                             state.ocrResult.document_class?.class?.toLowerCase() || 
                             'unknown';
         
+        // Include image_id for vision-enabled models
+        const requestBody = {
+            text: fullText,
+            model: modelId,
+            document_type: documentType,
+            image_id: state.selectedImageId || null,  // Pass image for vision models
+            use_vision: true  // Enable vision processing when available
+        };
+        
         const response = await fetch('/api/llm/process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text: fullText,
-                model: modelId,
-                document_type: documentType
-            })
+            body: JSON.stringify(requestBody)
         });
         
         if (!response.ok) {
@@ -1807,8 +1818,9 @@ function displayLlmResultMain(result) {
         confidenceSection.style.display = 'none';
     }
     
-    // Display meta info
-    modelUsed.textContent = result.model || 'Unknown';
+    // Display meta info (with vision indicator)
+    const visionTag = result.vision_used ? ' [Vision]' : '';
+    modelUsed.textContent = (result.model || 'Unknown') + visionTag;
     docType.textContent = result.document_type_name || result.document_type || 'Unknown';
 }
 

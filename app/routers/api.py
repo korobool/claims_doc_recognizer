@@ -13,7 +13,9 @@ from app.services.llm_service import (
     get_ollama_client, 
     get_llm_processor, 
     LLMModel,
-    OllamaClient
+    OllamaClient,
+    is_vision_model,
+    select_optimal_model
 )
 from app.config.document_schemas import (
     get_all_schemas,
@@ -63,12 +65,15 @@ class LLMProcessRequest(BaseModel):
     text: str
     model: Optional[str] = None
     document_type: Optional[str] = None
+    image_id: Optional[str] = None  # For multimodal/vision processing
+    use_vision: Optional[bool] = True  # Whether to use vision if available
 
 
 class LLMModelInfo(BaseModel):
     id: str
     name: str
     available: bool
+    supports_vision: bool = False  # Whether model supports multimodal/vision input
 
 
 class LLMStatusResponse(BaseModel):
@@ -222,7 +227,8 @@ async def llm_status():
         models.append(LLMModelInfo(
             id=model.value,
             name=model.display_name,
-            available=is_available
+            available=is_available,
+            supports_vision=model.supports_vision  # Add vision capability
         ))
     
     # Add any pulled models that aren't predefined
@@ -231,18 +237,23 @@ async def llm_status():
             # This is a model pulled by user but not in our predefined list
             # Use the model name as both id and display name
             display_name = pulled_model.replace(":", " ").title()
+            # Check if custom model supports vision
+            has_vision = is_vision_model(pulled_model)
+            vision_tag = " [Vision]" if has_vision else ""
             models.append(LLMModelInfo(
                 id=pulled_model,
-                name=f"{display_name} (custom)",
-                available=True
+                name=f"{display_name}{vision_tag} (custom)",
+                available=True,
+                supports_vision=has_vision
             ))
     
-    # Add Gemini if API key is available
+    # Add Gemini if API key is available (Gemini is always vision-capable)
     if GEMINI_AVAILABLE:
         models.append(LLMModelInfo(
             id="gemini-2.5-pro",
-            name="Gemini 2.5 Pro (Google)",
-            available=True
+            name="Gemini 2.5 Pro (Google) [Vision]",
+            available=True,
+            supports_vision=True
         ))
     
     return LLMStatusResponse(
@@ -426,7 +437,11 @@ async def llm_process_text(request: LLMProcessRequest):
     """
     Process OCR text using LLM for context-aware structured extraction.
     
+    Supports multimodal/vision processing when image_id is provided and the
+    selected model supports vision input.
+    
     Performs:
+    - Vision-enabled document understanding (with image)
     - Context-aware text correction based on document type
     - Structured field extraction using document schemas
     - Medicine name recognition (for medical documents)
@@ -435,6 +450,20 @@ async def llm_process_text(request: LLMProcessRequest):
     Returns structured data with extracted fields matching the document schema.
     """
     from app.services.llm_service import GEMINI_AVAILABLE, get_gemini_processor
+    
+    # Load image bytes if image_id is provided
+    image_bytes = None
+    if request.image_id and request.use_vision:
+        if request.image_id in images_store:
+            image_path = images_store[request.image_id]["path"]
+            try:
+                with open(image_path, "rb") as f:
+                    image_bytes = f.read()
+                print(f"[LLM] Loaded image for vision processing: {len(image_bytes)} bytes")
+            except Exception as e:
+                print(f"[LLM] Warning: Could not load image: {e}")
+        else:
+            print(f"[LLM] Warning: Image ID {request.image_id} not found in store")
     
     # Check if Gemini is requested
     if request.model and request.model.lower().startswith("gemini"):
@@ -445,7 +474,11 @@ async def llm_process_text(request: LLMProcessRequest):
             )
         
         processor = get_gemini_processor()
-        result = await processor.process_text(request.text, request.document_type)
+        result = await processor.process_text(
+            request.text, 
+            request.document_type,
+            image_bytes  # Pass image for Gemini vision
+        )
         return result
     
     # Otherwise use Ollama
@@ -454,9 +487,13 @@ async def llm_process_text(request: LLMProcessRequest):
     if not await client.is_available():
         raise HTTPException(status_code=503, detail="Ollama service not available. Please start Ollama.")
     
+    # Get available models for potential auto-selection
+    available_models = await client.list_models()
+    
     # Get model - can be predefined LLMModel or custom string
     model = None
     model_id = request.model
+    
     if request.model:
         # Try to match to predefined model first
         for m in LLMModel:
@@ -466,7 +503,6 @@ async def llm_process_text(request: LLMProcessRequest):
         
         # If not a predefined model, check if it's available as custom model
         if model is None:
-            available_models = await client.list_models()
             if request.model not in available_models:
                 raise HTTPException(
                     status_code=400, 
@@ -481,31 +517,63 @@ async def llm_process_text(request: LLMProcessRequest):
                     status_code=400, 
                     detail=f"Model {model.display_name} not available. Please pull it first."
                 )
+    else:
+        # Auto-select optimal model based on context
+        has_image = image_bytes is not None
+        selected = select_optimal_model(
+            available_models,
+            has_image=has_image,
+            document_type=request.document_type,
+            prefer_vision=request.use_vision
+        )
+        if selected:
+            model_id = selected
+            print(f"[LLM] Auto-selected model: {model_id} (image={'yes' if has_image else 'no'})")
     
     processor = get_llm_processor()
     
-    # Use context-aware structured extraction for all document types
-    result = await processor.process_text(request.text, model, request.document_type)
+    # Use context-aware structured extraction with optional vision
+    result = await processor.process_text(
+        request.text, 
+        model if model else model_id,
+        request.document_type,
+        image_bytes  # Pass image for vision models
+    )
     
     return result
 
 
 @router.post("/llm/denoise")
 async def llm_denoise_text(request: LLMProcessRequest):
-    """Quick denoising of OCR text - removes artifacts and fixes obvious errors."""
+    """Quick denoising of OCR text - removes artifacts and fixes obvious errors.
+    
+    Supports vision-enabled denoising when image_id is provided.
+    """
     client = get_ollama_client()
     
     if not await client.is_available():
         raise HTTPException(status_code=503, detail="Ollama service not available")
     
+    # Load image bytes if provided
+    image_bytes = None
+    if request.image_id and request.use_vision:
+        if request.image_id in images_store:
+            image_path = images_store[request.image_id]["path"]
+            try:
+                with open(image_path, "rb") as f:
+                    image_bytes = f.read()
+            except Exception as e:
+                print(f"[LLM] Warning: Could not load image for denoising: {e}")
+    
     model = LLMModel.from_string(request.model) if request.model else None
     processor = get_llm_processor()
     
-    denoised = await processor.denoise_text(request.text, model)
+    denoised = await processor.denoise_text(request.text, model, image_bytes)
     
     return {
         "original_text": request.text,
-        "denoised_text": denoised
+        "denoised_text": denoised,
+        "vision_used": image_bytes is not None
     }
 
 
