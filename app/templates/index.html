@@ -187,6 +187,17 @@
                                     </button>
                                 </div>
                             </div>
+                            <div class="model-capabilities" id="modelCapabilities" style="display: none;">
+                                <span class="capability-badge vision-badge" id="visionBadge" style="display: none;">
+                                    👁️ Vision Enabled
+                                </span>
+                                <span class="capability-badge text-badge" id="textOnlyBadge" style="display: none;">
+                                    📝 Text Only
+                                </span>
+                                <span class="capability-badge medical-badge" id="medicalBadge" style="display: none;">
+                                    🏥 Medical Specialized
+                                </span>
+                            </div>
                             <div class="pull-progress" id="pullProgress" style="display: none;">
                                 <div class="progress-bar">
                                     <div class="progress-fill" id="pullProgressFill"></div>
@@ -195,6 +206,7 @@
                             </div>
                             <div class="settings-note">
                                 Selected model will be used for LLM processing and schema generation.
+                                <br><small>👁️ Vision models can see the document image for better accuracy.</small>
                             </div>
                         </div>
                     </div>

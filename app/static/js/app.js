@@ -1062,8 +1062,14 @@ function updateLlmStatusUI() {
             models.forEach(model => {
                 const option = document.createElement('option');
                 option.value = model.id;
-                option.textContent = model.name + (model.available ? '' : ' (not pulled)');
+                // Show vision indicator in dropdown
+                const visionTag = model.supports_vision ? ' 👁️' : '';
+                option.textContent = model.name + visionTag + (model.available ? '' : ' (not pulled)');
                 option.dataset.available = model.available;
+                option.dataset.vision = model.supports_vision || false;
+                option.dataset.medical = model.name.toLowerCase().includes('meditron') || 
+                                         model.name.toLowerCase().includes('medgemma') ||
+                                         model.name.toLowerCase().includes('medical');
                 elements.llmModelSelect.appendChild(option);
             });
             
@@ -1089,8 +1095,13 @@ function handleModelSelect() {
     
     const selectedOption = elements.llmModelSelect.selectedOptions[0];
     const isAvailable = selectedOption?.dataset.available === 'true';
+    const supportsVision = selectedOption?.dataset.vision === 'true';
+    const isMedical = selectedOption?.dataset.medical === 'true';
     
     state.llmStatus.selectedModel = elements.llmModelSelect.value;
+    
+    // Update capability badges
+    updateModelCapabilityBadges(supportsVision, isMedical, isAvailable);
     
     // Update pull button
     if (elements.pullModelBtn) {
@@ -1100,6 +1111,35 @@ function handleModelSelect() {
     
     // Update process button
     updateProcessButtonState();
+}
+
+function updateModelCapabilityBadges(supportsVision, isMedical, isAvailable) {
+    const capabilitiesDiv = document.getElementById('modelCapabilities');
+    const visionBadge = document.getElementById('visionBadge');
+    const textOnlyBadge = document.getElementById('textOnlyBadge');
+    const medicalBadge = document.getElementById('medicalBadge');
+    
+    if (!capabilitiesDiv) return;
+    
+    if (!isAvailable) {
+        capabilitiesDiv.style.display = 'none';
+        return;
+    }
+    
+    capabilitiesDiv.style.display = 'flex';
+    
+    // Show vision or text-only badge
+    if (visionBadge) {
+        visionBadge.style.display = supportsVision ? 'inline-flex' : 'none';
+    }
+    if (textOnlyBadge) {
+        textOnlyBadge.style.display = supportsVision ? 'none' : 'inline-flex';
+    }
+    
+    // Show medical badge if applicable
+    if (medicalBadge) {
+        medicalBadge.style.display = isMedical ? 'inline-flex' : 'none';
+    }
 }
 
 function updateProcessButtonState() {
@@ -1499,8 +1539,14 @@ function updateSettingsUI() {
         state.llmStatus.models.forEach(model => {
             const option = document.createElement('option');
             option.value = model.id;
-            option.textContent = model.name + (model.available ? ' ✓' : ' (not pulled)');
+            // Show vision indicator in dropdown
+            const visionTag = model.supports_vision ? ' 👁️' : '';
+            option.textContent = model.name + visionTag + (model.available ? ' ✓' : ' (not pulled)');
             option.dataset.available = model.available;
+            option.dataset.vision = model.supports_vision || false;
+            option.dataset.medical = model.name.toLowerCase().includes('meditron') || 
+                                     model.name.toLowerCase().includes('medgemma') ||
+                                     model.name.toLowerCase().includes('medical');
             modelSelect.appendChild(option);
         });
         modelSelect.disabled = false;
@@ -1543,8 +1589,13 @@ function handleModelSelect() {
     
     const selectedOption = modelSelect.options[modelSelect.selectedIndex];
     const isAvailable = selectedOption?.dataset.available === 'true';
+    const supportsVision = selectedOption?.dataset.vision === 'true';
+    const isMedical = selectedOption?.dataset.medical === 'true';
     
     state.llmStatus.selectedModel = modelSelect.value;
+    
+    // Update capability badges
+    updateModelCapabilityBadges(supportsVision, isMedical, isAvailable);
     
     // Update pull button
     pullBtn.disabled = isAvailable;
