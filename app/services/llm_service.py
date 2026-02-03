@@ -93,17 +93,17 @@ def is_vision_model(model_id: str) -> bool:
 
 class LLMModel(Enum):
     """Available LLM models for post-processing."""
-    # Text-only models
-    DEVSTRAL = "devstral:24b"
-    QWEN_2_5 = "qwen2.5:7b"
-    
-    # Vision-enabled models (multimodal)
-    GEMMA3_27B = "gemma3:27b"           # Google Gemma 3 27B with vision - RECOMMENDED
+    # Vision-enabled models (multimodal) - listed first as preferred
+    GEMMA3_27B = "gemma3:27b"           # Google Gemma 3 27B with vision - RECOMMENDED DEFAULT
     GEMMA3_12B = "gemma3:12b"           # Google Gemma 3 12B with vision
     LLAVA_34B = "llava:34b"             # LLaVA 34B - high accuracy
     LLAVA_13B = "llava:13b"             # LLaVA 13B - balanced
     LLAMA_VISION = "llama3.2-vision:11b" # Llama 3.2 Vision
     MINICPM_V = "minicpm-v:8b"          # MiniCPM-V - efficient
+    
+    # Text-only models
+    DEVSTRAL = "devstral:24b"
+    QWEN_2_5 = "qwen2.5:7b"
     
     # Medical specialized (text-only)
     LLAMA_MEDITRON = "meditron:7b"

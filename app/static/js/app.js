@@ -1073,8 +1073,9 @@ function updateLlmStatusUI() {
                 elements.llmModelSelect.appendChild(option);
             });
             
-            // Select first available model
-            const firstAvailable = models.find(m => m.available);
+            // Select first available vision model, or first available model
+            const firstVisionAvailable = models.find(m => m.available && m.supports_vision);
+            const firstAvailable = firstVisionAvailable || models.find(m => m.available);
             if (firstAvailable) {
                 elements.llmModelSelect.value = firstAvailable.id;
                 state.llmStatus.selectedModel = firstAvailable.id;
@@ -1555,11 +1556,12 @@ function updateSettingsUI() {
         });
         modelSelect.disabled = false;
         
-        // Restore or select first available model
+        // Restore or select first available vision model, or first available model
         if (state.llmStatus.selectedModel) {
             modelSelect.value = state.llmStatus.selectedModel;
         } else {
-            const firstAvailable = state.llmStatus.models.find(m => m.available);
+            const firstVisionAvailable = state.llmStatus.models.find(m => m.available && m.supports_vision);
+            const firstAvailable = firstVisionAvailable || state.llmStatus.models.find(m => m.available);
             if (firstAvailable) {
                 modelSelect.value = firstAvailable.id;
                 state.llmStatus.selectedModel = firstAvailable.id;
