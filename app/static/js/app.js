@@ -1276,15 +1276,17 @@ async function processWithLlm() {
     
     try {
         // Include image_id for vision-enabled models
+        // Use image_id from OCR result (more reliable) or fall back to selected image
+        const imageId = state.ocrResult?.image_id || state.selectedImageId || null;
         const requestBody = {
             text: fullText,
             model: modelId,
             document_type: docType,
-            image_id: state.selectedImageId || null,  // Pass image for vision models
+            image_id: imageId,  // Pass image for vision models
             use_vision: true  // Enable vision processing when available
         };
         
-        console.log('[LLM] Sending request with image_id:', state.selectedImageId, 'body:', requestBody);
+        console.log('[LLM] Sending request with image_id:', imageId, 'body:', requestBody);
         
         const response = await fetch('/api/llm/process', {
             method: 'POST',
@@ -1775,15 +1777,17 @@ async function processWithLlmMain() {
                             'unknown';
         
         // Include image_id for vision-enabled models
+        // Use image_id from OCR result (more reliable) or fall back to selected image
+        const imageId = state.ocrResult?.image_id || state.selectedImageId || null;
         const requestBody = {
             text: fullText,
             model: modelId,
             document_type: documentType,
-            image_id: state.selectedImageId || null,  // Pass image for vision models
+            image_id: imageId,  // Pass image for vision models
             use_vision: true  // Enable vision processing when available
         };
         
-        console.log('[LLM Main] Sending request with image_id:', state.selectedImageId, 'body:', requestBody);
+        console.log('[LLM Main] Sending request with image_id:', imageId, 'body:', requestBody);
         
         const response = await fetch('/api/llm/process', {
             method: 'POST',

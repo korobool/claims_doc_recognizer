@@ -143,7 +143,7 @@ class LLMModel(Enum):
             "gpt-oss": cls.GPT_OSS,
             "gpt-oss-20b": cls.GPT_OSS,
         }
-        return mapping.get(model_lower, cls.DEVSTRAL)
+        return mapping.get(model_lower, cls.GEMMA3_27B)  # Default to vision-enabled model
     
     @property
     def display_name(self) -> str:
@@ -178,7 +178,7 @@ class LLMModel(Enum):
 class LLMConfig:
     """Configuration for LLM service."""
     ollama_base_url: str = "http://localhost:11434"
-    default_model: LLMModel = LLMModel.DEVSTRAL
+    default_model: LLMModel = LLMModel.GEMMA3_27B  # Vision-enabled model as default
     default_vision_model: LLMModel = LLMModel.GEMMA3_27B  # Default for multimodal
     timeout: float = 180.0  # LLM inference can be slow, especially for structured extraction
     max_tokens: int = 4096

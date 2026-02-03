@@ -153,6 +153,9 @@ async def recognize(request: ImageIdRequest):
     
     result = recognize_text(image_bytes)
     
+    # Include image_id in result for vision LLM processing
+    result["image_id"] = image_id
+    
     return result
 
 
@@ -184,6 +187,9 @@ async def recognize_region_endpoint(request: RecognizeRegionRequest):
         image_bytes = f.read()
     
     result = recognize_region(image_bytes, request.bbox)
+    
+    # Include image_id in result for vision LLM processing
+    result["image_id"] = image_id
     
     return result
 
@@ -450,6 +456,9 @@ async def llm_process_text(request: LLMProcessRequest):
     Returns structured data with extracted fields matching the document schema.
     """
     from app.services.llm_service import GEMINI_AVAILABLE, get_gemini_processor
+    
+    # === VISION FIX v2 === Debug: Log incoming request
+    print(f"[LLM API v2] Received request - image_id: '{request.image_id}', use_vision: {request.use_vision}, model: {request.model}")
     
     # Load image bytes if image_id is provided
     image_bytes = None
