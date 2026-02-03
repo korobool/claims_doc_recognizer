@@ -1,0 +1,59 @@
+# Unknown / General Document Schema
+# Fallback schema for documents that don't match any specific type
+
+type_id: unknown
+display_name: General Document
+
+clip_prompts:
+  - "a document with text"
+  - "a scanned document"
+  - "a page with printed or handwritten text"
+
+keywords: []
+
+llm_context: |
+  You are processing a GENERAL DOCUMENT of unknown type.
+
+  Since the document type is not specifically recognized, focus on:
+  - Extracting any clearly identifiable information
+  - Preserving the document structure
+  - Correcting obvious OCR errors
+  - Identifying key entities (names, dates, amounts)
+
+  Be conservative in your corrections - only fix clear OCR errors.
+
+fields:
+  - name: document_title
+    type: text
+    description: "Title or heading if present"
+    required: false
+
+  - name: document_date
+    type: date
+    description: "Any date found in the document"
+    required: false
+
+  - name: document_type_guess
+    type: text
+    description: "Your best guess of what type of document this is"
+    required: false
+
+  - name: key_entities
+    type: list
+    description: "Important names, organizations, or identifiers found"
+    required: false
+
+  - name: amounts
+    type: list
+    description: "Any monetary amounts or quantities found"
+    required: false
+
+  - name: dates
+    type: list
+    description: "All dates found in the document"
+    required: false
+
+  - name: summary
+    type: text
+    description: "Brief summary of document content"
+    required: false

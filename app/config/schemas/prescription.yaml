@@ -1,0 +1,50 @@
+# Medical Prescription Schema - Simplified for List Extraction
+type_id: prescription
+display_name: Medical Prescription
+
+clip_prompts:
+  - "a medical prescription document"
+  - "a doctor's prescription with medication names"
+  - "a pharmacy prescription form"
+
+keywords:
+  - rx
+  - prescription
+  - medication
+  - mg
+  - tablet
+  - capsule
+  - take
+  - daily
+
+llm_context: |
+  This is a MEDICAL PRESCRIPTION. Your main task is to extract the LIST OF MEDICATIONS.
+  
+  Fix common OCR errors:
+  - "Amoxici11in" → "Amoxicillin", "5OOmg" → "500mg", "1OO" → "100"
+  - "0" (zero) vs "O" (letter) in dosages
+  
+  Latin abbreviations:
+  - bid = twice daily, tid = three times daily, qid = four times daily
+  - PRN = as needed, SIG = instructions
+
+fields:
+  - name: patient_name
+    type: text
+    description: "Patient's full name"
+    required: true
+
+  - name: prescription_date
+    type: date
+    description: "Date of prescription"
+    required: false
+
+  - name: prescriber_name
+    type: text
+    description: "Doctor/prescriber name"
+    required: false
+
+  - name: medications
+    type: list
+    description: "List of prescribed medications. Each item should have: name, dosage (e.g. 500mg), quantity, instructions (e.g. take twice daily)"
+    required: true

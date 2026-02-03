@@ -9,6 +9,8 @@ A local web application for document OCR (Optical Character Recognition) with im
 - **OCR Engine**: Surya OCR (VikParuchuri/surya) - transformer-based multilingual OCR
 - **Image Processing**: OpenCV, SciPy, NumPy
 - **Document Classification**: OpenAI CLIP (clip-vit-base-patch32) + keyword-based hybrid
+- **LLM Post-Processing**: Ollama (local) + Google Gemini (cloud) with multimodal vision support
+- **Schema System**: YAML-based document schemas for structured extraction
 - **Frontend**: Vanilla JavaScript, HTML5, CSS3 (served via Jinja2 templates)
 
 ## 2. System Architecture
@@ -18,12 +20,11 @@ A local web application for document OCR (Optical Character Recognition) with im
 │                         Frontend (Web UI)                            │
 ├──────────────────┬──────────────────────────┬───────────────────────┤
 │   Left Panel     │      Center Panel        │     Right Panel       │
-│   - File Upload  │   - Image Viewer         │   - Document Class    │
-│   - Image List   │   - Normalize Button     │   - JSON Output       │
-│   - Thumbnails   │   - Recognize Button     │   - Inline Editing    │
-│                  │   - Add BBox Button      │   - Save Button       │
-│                  │   - Zoom Controls        │                       │
-│                  │   - Text Overlay         │                       │
+│   - File Upload  │   Tabs:                  │   - Document Class    │
+│   - Image List   │   - Document Viewer      │   - JSON Output       │
+│   - Thumbnails   │   - LLM Results          │   - Inline Editing    │
+│                  │   - Schema Templates     │   - Save Button       │
+│                  │   - Settings             │                       │
 └──────────────────┴──────────────────────────┴───────────────────────┘
                                │
                                ▼
@@ -35,6 +36,11 @@ A local web application for document OCR (Optical Character Recognition) with im
 │  POST /api/recognize       - Full OCR + classification              │
 │  POST /api/recognize-region - OCR on selected region                │
 │  GET  /api/image/{id}      - Retrieve image                         │
+│  GET  /api/llm/status      - LLM service status, models, vision caps│
+│  POST /api/llm/process     - LLM extraction (image_id for vision)   │
+│  POST /api/llm/pull/{id}   - Pull Ollama model                      │
+│  GET  /api/schemas         - List document schemas                  │
+│  POST /api/schemas/generate - Generate schema with LLM              │
 └─────────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -49,6 +55,17 @@ A local web application for document OCR (Optical Character Recognition) with im
 │    - recognize_text() - Surya OCR                                   │
 │    - recognize_region() - Partial OCR                               │
 │    - classify_document_hybrid() - CLIP + keyword classification     │
+│                                                                     │
+│  llm_service.py:                                                    │
+│    - OllamaClient - Local LLM via Ollama (with vision support)      │
+│    - GeminiClient - Google Gemini API (with vision support)         │
+│    - LLMPostProcessor - Schema-based extraction (multimodal)        │
+│    - Vision models: Gemma 3, LLaVA, Llama Vision, MiniCPM-V         │
+│                                                                     │
+│  document_schemas.py:                                               │
+│    - get_schemas() - Load YAML schemas                              │
+│    - get_schema() - Get schema by type_id                           │
+│    - save_schema() - Save schema to YAML                            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -97,6 +114,7 @@ Surya OCR is a transformer-based OCR engine that provides:
   "image_bbox": [0, 0, width, height],
   "document_class": {
     "class": "Receipt",
+    "type_id": "receipt",
     "confidence": 0.85,
     "method": "hybrid"
   }
@@ -280,6 +298,10 @@ scipy>=1.10.0
 # Classification
 transformers>=4.36.0
 torch>=2.0.0
+
+# LLM Integration
+httpx>=0.25.0
+pyyaml>=6.0.0
 
 # Utilities
 requests>=2.31.0

@@ -9,7 +9,18 @@ const state = {
     isDrawingMode: false,
     isDrawing: false,
     drawStart: null,
-    deviceInfoExpanded: false
+    deviceInfoExpanded: false,
+    // LLM state
+    llmStatus: {
+        ollamaAvailable: false,
+        models: [],
+        selectedModel: null
+    },
+    llmResult: null,
+    // Schema management state
+    schemas: [],
+    selectedSchemaId: null,
+    schemaYamlDirty: false
 };
 
 // DOM elements
@@ -53,7 +64,22 @@ const elements = {
     gpuMemory: document.getElementById('gpuMemory'),
     gpuMemoryRow: document.getElementById('gpuMemoryRow'),
     suryaDevice: document.getElementById('suryaDevice'),
-    clipDevice: document.getElementById('clipDevice')
+    clipDevice: document.getElementById('clipDevice'),
+    // LLM elements
+    jsonTab: document.getElementById('jsonTab'),
+    llmTab: document.getElementById('llmTab'),
+    ollamaStatus: document.getElementById('ollamaStatus'),
+    ollamaStatusText: document.getElementById('ollamaStatusText'),
+    llmModelSelect: document.getElementById('llmModelSelect'),
+    pullModelBtn: document.getElementById('pullModelBtn'),
+    processLlmBtn: document.getElementById('processLlmBtn'),
+    llmPlaceholder: document.getElementById('llmPlaceholder'),
+    llmResult: document.getElementById('llmResult'),
+    llmEnhancedText: document.getElementById('llmEnhancedText'),
+    llmMedicationsSection: document.getElementById('llmMedicationsSection'),
+    llmMedications: document.getElementById('llmMedications'),
+    llmModelUsed: document.getElementById('llmModelUsed'),
+    llmLoading: document.getElementById('llmLoading')
 };
 
 // Initialization
@@ -88,6 +114,23 @@ function init() {
     // Fetch device info on load
     console.log('Initializing app, fetching device info...');
     fetchDeviceInfo();
+    
+    // LLM controls
+    if (elements.pullModelBtn) {
+        elements.pullModelBtn.addEventListener('click', pullSelectedModel);
+    }
+    if (elements.processLlmBtn) {
+        elements.processLlmBtn.addEventListener('click', processWithLlm);
+    }
+    if (elements.llmModelSelect) {
+        elements.llmModelSelect.addEventListener('change', handleModelSelect);
+    }
+    
+    // Check LLM status
+    checkLlmStatus();
+    
+    // Initialize schema management
+    initSchemaManagement();
 }
 
 // === File upload ===
@@ -275,6 +318,9 @@ async function recognizeImage() {
         // Enable buttons
         elements.saveBtn.disabled = false;
         elements.addBboxBtn.disabled = false;
+        
+        // Update LLM process button state
+        updateProcessButtonState();
         
         // Refresh device info (models are now initialized)
         fetchDeviceInfo();
@@ -924,5 +970,1219 @@ function toggleDeviceInfo() {
     // Refresh device info when expanding
     if (state.deviceInfoExpanded) {
         fetchDeviceInfo();
+    }
+}
+
+// =============================================================================
+// LLM POST-PROCESSING
+// =============================================================================
+
+function switchTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    
+    // Update tab content
+    if (elements.jsonTab) {
+        elements.jsonTab.style.display = tabName === 'json' ? 'flex' : 'none';
+        elements.jsonTab.classList.toggle('active', tabName === 'json');
+    }
+    if (elements.llmTab) {
+        elements.llmTab.style.display = tabName === 'llm' ? 'flex' : 'none';
+        elements.llmTab.classList.toggle('active', tabName === 'llm');
+    }
+}
+
+async function checkLlmStatus() {
+    try {
+        const response = await fetch('/api/llm/status');
+        if (!response.ok) throw new Error('Failed to check LLM status');
+        
+        const data = await response.json();
+        state.llmStatus.ollamaAvailable = data.ollama_available;
+        state.llmStatus.models = data.models;
+        state.llmStatus.acceleration = data.acceleration;
+        state.llmStatus.accelerationDetails = data.acceleration_details;
+        state.llmStatus.version = data.version;
+        
+        updateLlmStatusUI();
+    } catch (error) {
+        console.error('LLM status check failed:', error);
+        state.llmStatus.ollamaAvailable = false;
+        updateLlmStatusUI();
+    }
+}
+
+function updateLlmStatusUI() {
+    const { ollamaAvailable, models, acceleration, accelerationDetails } = state.llmStatus;
+    
+    // Update status indicator
+    if (elements.ollamaStatus) {
+        elements.ollamaStatus.textContent = ollamaAvailable ? '🟢' : '🔴';
+        elements.ollamaStatus.className = 'status-indicator ' + (ollamaAvailable ? 'online' : 'offline');
+    }
+    if (elements.ollamaStatusText) {
+        elements.ollamaStatusText.textContent = ollamaAvailable ? 'Ollama Connected' : 'Ollama Offline';
+    }
+    
+    // Update acceleration display
+    const accelContainer = document.getElementById('llmAcceleration');
+    const accelIcon = document.getElementById('accelIcon');
+    const accelText = document.getElementById('accelText');
+    
+    if (accelContainer && accelIcon && accelText) {
+        accelContainer.className = 'llm-acceleration';
+        
+        if (acceleration === 'metal') {
+            accelContainer.classList.add('metal');
+            accelIcon.textContent = '🍎';
+            accelText.textContent = accelerationDetails || 'Metal (Apple Silicon)';
+        } else if (acceleration === 'cuda') {
+            accelContainer.classList.add('cuda');
+            accelIcon.textContent = '🟢';
+            accelText.textContent = accelerationDetails || 'CUDA (NVIDIA GPU)';
+        } else if (acceleration === 'rocm') {
+            accelContainer.classList.add('cuda');
+            accelIcon.textContent = '🔴';
+            accelText.textContent = accelerationDetails || 'ROCm (AMD GPU)';
+        } else {
+            accelContainer.classList.add('cpu');
+            accelIcon.textContent = '💻';
+            accelText.textContent = accelerationDetails || 'CPU Only';
+        }
+    }
+    
+    // Update model select
+    if (elements.llmModelSelect) {
+        elements.llmModelSelect.innerHTML = '';
+        elements.llmModelSelect.disabled = !ollamaAvailable;
+        
+        if (ollamaAvailable && models.length > 0) {
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                // Show vision indicator in dropdown
+                const visionTag = model.supports_vision ? ' 👁️' : '';
+                option.textContent = model.name + visionTag + (model.available ? '' : ' (not pulled)');
+                option.dataset.available = model.available;
+                option.dataset.vision = model.supports_vision || false;
+                option.dataset.medical = model.name.toLowerCase().includes('meditron') || 
+                                         model.name.toLowerCase().includes('medgemma') ||
+                                         model.name.toLowerCase().includes('medical');
+                elements.llmModelSelect.appendChild(option);
+            });
+            
+            // Select first available vision model, or first available model
+            const firstVisionAvailable = models.find(m => m.available && m.supports_vision);
+            const firstAvailable = firstVisionAvailable || models.find(m => m.available);
+            if (firstAvailable) {
+                elements.llmModelSelect.value = firstAvailable.id;
+                state.llmStatus.selectedModel = firstAvailable.id;
+            }
+        } else {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = ollamaAvailable ? 'No models' : 'Ollama offline';
+            elements.llmModelSelect.appendChild(option);
+        }
+        
+        handleModelSelect();
+    }
+}
+
+function handleModelSelect() {
+    if (!elements.llmModelSelect) return;
+    
+    const selectedOption = elements.llmModelSelect.selectedOptions[0];
+    const isAvailable = selectedOption?.dataset.available === 'true';
+    const supportsVision = selectedOption?.dataset.vision === 'true';
+    const isMedical = selectedOption?.dataset.medical === 'true';
+    
+    state.llmStatus.selectedModel = elements.llmModelSelect.value;
+    
+    // Update capability badges
+    updateModelCapabilityBadges(supportsVision, isMedical, isAvailable);
+    
+    // Update pull button
+    if (elements.pullModelBtn) {
+        elements.pullModelBtn.disabled = !state.llmStatus.ollamaAvailable || isAvailable;
+        elements.pullModelBtn.title = isAvailable ? 'Model already available' : 'Pull model from registry';
+    }
+    
+    // Update process button
+    updateProcessButtonState();
+}
+
+function updateModelCapabilityBadges(supportsVision, isMedical, isAvailable) {
+    const capabilitiesDiv = document.getElementById('modelCapabilities');
+    const visionBadge = document.getElementById('visionBadge');
+    const textOnlyBadge = document.getElementById('textOnlyBadge');
+    const medicalBadge = document.getElementById('medicalBadge');
+    
+    if (!capabilitiesDiv) return;
+    
+    if (!isAvailable) {
+        capabilitiesDiv.style.display = 'none';
+        return;
+    }
+    
+    capabilitiesDiv.style.display = 'flex';
+    
+    // Show vision or text-only badge
+    if (visionBadge) {
+        visionBadge.style.display = supportsVision ? 'inline-flex' : 'none';
+    }
+    if (textOnlyBadge) {
+        textOnlyBadge.style.display = supportsVision ? 'none' : 'inline-flex';
+    }
+    
+    // Show medical badge if applicable
+    if (medicalBadge) {
+        medicalBadge.style.display = isMedical ? 'inline-flex' : 'none';
+    }
+}
+
+function updateProcessButtonState() {
+    if (!elements.processLlmBtn) return;
+    
+    const hasOcr = state.ocrResult && state.ocrResult.text_lines && state.ocrResult.text_lines.length > 0;
+    const hasModel = state.llmStatus.ollamaAvailable && state.llmStatus.selectedModel;
+    const selectedOption = elements.llmModelSelect?.selectedOptions[0];
+    const modelAvailable = selectedOption?.dataset.available === 'true';
+    
+    elements.processLlmBtn.disabled = !hasOcr || !hasModel || !modelAvailable;
+}
+
+async function pullSelectedModel() {
+    const modelId = state.llmStatus.selectedModel;
+    if (!modelId) return;
+    
+    elements.pullModelBtn.disabled = true;
+    elements.pullModelBtn.textContent = '⏳';
+    
+    // Show progress bar
+    const progressContainer = document.getElementById('pullProgress');
+    const progressFill = document.getElementById('pullProgressFill');
+    const progressText = document.getElementById('pullProgressText');
+    
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '0%';
+        progressText.textContent = 'Starting download...';
+    }
+    
+    try {
+        // Use streaming endpoint for progress updates
+        const eventSource = new EventSource(`/api/llm/pull/${encodeURIComponent(modelId)}/stream`);
+        
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.status === 'already_available') {
+                    progressText.textContent = 'Model already available';
+                    progressFill.style.width = '100%';
+                    eventSource.close();
+                    setTimeout(() => finishPull(true), 500);
+                    return;
+                }
+                
+                if (data.status === 'complete') {
+                    progressText.textContent = 'Download complete!';
+                    progressFill.style.width = '100%';
+                    eventSource.close();
+                    setTimeout(() => finishPull(true), 500);
+                    return;
+                }
+                
+                if (data.status === 'error') {
+                    progressText.textContent = 'Error: ' + (data.error || 'Unknown error');
+                    eventSource.close();
+                    setTimeout(() => finishPull(false), 2000);
+                    return;
+                }
+                
+                // Update progress
+                if (data.total && data.completed) {
+                    const percent = Math.round((data.completed / data.total) * 100);
+                    progressFill.style.width = percent + '%';
+                    
+                    // Format size
+                    const completedMB = (data.completed / 1024 / 1024).toFixed(1);
+                    const totalMB = (data.total / 1024 / 1024).toFixed(1);
+                    progressText.textContent = `Downloading: ${completedMB} MB / ${totalMB} MB (${percent}%)`;
+                } else if (data.status) {
+                    progressText.textContent = data.status;
+                }
+            } catch (e) {
+                console.error('Error parsing progress:', e);
+            }
+        };
+        
+        eventSource.onerror = (error) => {
+            console.error('EventSource error:', error);
+            eventSource.close();
+            finishPull(false);
+        };
+        
+    } catch (error) {
+        console.error('Model pull failed:', error);
+        alert('Failed to pull model: ' + error.message);
+        finishPull(false);
+    }
+    
+    async function finishPull(success) {
+        elements.pullModelBtn.textContent = '⬇️';
+        
+        if (progressContainer) {
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+            }, 1000);
+        }
+        
+        // Refresh status
+        await checkLlmStatus();
+        
+        if (!success) {
+            alert('Failed to pull model');
+        }
+    }
+}
+
+async function processWithLlm() {
+    if (!state.ocrResult || !state.ocrResult.text_lines) {
+        alert('No OCR results to process');
+        return;
+    }
+    
+    const modelId = state.llmStatus.selectedModel;
+    if (!modelId) {
+        alert('No model selected');
+        return;
+    }
+    
+    // Get document type from OCR result
+    const docType = state.ocrResult.document_class?.type_id || 
+                    state.ocrResult.document_class?.class?.toLowerCase() || 
+                    null;
+    
+    // Combine text lines into single text
+    const fullText = state.ocrResult.text_lines
+        .map(line => line.text)
+        .join('\n');
+    
+    // Show loading
+    showLlmLoading(true);
+    
+    try {
+        // Include image_id for vision-enabled models
+        // Use image_id from OCR result (more reliable) or fall back to selected image
+        const imageId = state.ocrResult?.image_id || state.selectedImageId || null;
+        const requestBody = {
+            text: fullText,
+            model: modelId,
+            document_type: docType,
+            image_id: imageId,  // Pass image for vision models
+            use_vision: true  // Enable vision processing when available
+        };
+        
+        console.log('[LLM] Sending request with image_id:', imageId, 'body:', requestBody);
+        
+        const response = await fetch('/api/llm/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'LLM processing failed');
+        }
+        
+        const result = await response.json();
+        state.llmResult = result;
+        
+        displayLlmResult(result);
+        
+    } catch (error) {
+        console.error('LLM processing failed:', error);
+        alert('LLM processing failed: ' + error.message);
+        showLlmLoading(false);
+    }
+}
+
+function showLlmLoading(show) {
+    if (elements.llmPlaceholder) elements.llmPlaceholder.style.display = 'none';
+    if (elements.llmResult) elements.llmResult.style.display = show ? 'none' : 'block';
+    if (elements.llmLoading) elements.llmLoading.style.display = show ? 'flex' : 'none';
+}
+
+function displayLlmResult(result) {
+    showLlmLoading(false);
+    
+    if (!result.success) {
+        if (elements.llmPlaceholder) {
+            elements.llmPlaceholder.innerHTML = `<p>Error: ${result.error || 'Processing failed'}</p>`;
+            elements.llmPlaceholder.style.display = 'flex';
+        }
+        if (elements.llmResult) elements.llmResult.style.display = 'none';
+        return;
+    }
+    
+    if (elements.llmResult) elements.llmResult.style.display = 'block';
+    if (elements.llmPlaceholder) elements.llmPlaceholder.style.display = 'none';
+    
+    // Display document type badge
+    const docTypeBadge = document.getElementById('llmDocTypeBadge');
+    if (docTypeBadge) {
+        docTypeBadge.textContent = result.document_type_name || result.document_type || '';
+    }
+    
+    // Display extracted fields
+    const fieldsContainer = document.getElementById('llmExtractedFields');
+    if (fieldsContainer && result.extracted_fields) {
+        const requiredFields = result.required_fields || [];
+        fieldsContainer.innerHTML = '';
+        
+        for (const [fieldName, fieldValue] of Object.entries(result.extracted_fields)) {
+            const fieldItem = document.createElement('div');
+            fieldItem.className = 'field-item';
+            
+            const isRequired = requiredFields.includes(fieldName);
+            const displayName = fieldName.replace(/_/g, ' ');
+            
+            const nameEl = document.createElement('div');
+            nameEl.className = 'field-name' + (isRequired ? ' required' : '');
+            nameEl.textContent = displayName;
+            fieldItem.appendChild(nameEl);
+            
+            const valueEl = document.createElement('div');
+            valueEl.className = 'field-value';
+            
+            if (fieldValue === null || fieldValue === undefined) {
+                valueEl.className += ' empty';
+                valueEl.textContent = 'Not found';
+            } else if (Array.isArray(fieldValue)) {
+                valueEl.className += ' list-value';
+                if (fieldValue.length === 0) {
+                    valueEl.className += ' empty';
+                    valueEl.textContent = 'None';
+                } else {
+                    fieldValue.forEach(item => {
+                        const itemEl = document.createElement('div');
+                        itemEl.className = 'list-item';
+                        itemEl.textContent = typeof item === 'object' ? JSON.stringify(item) : item;
+                        valueEl.appendChild(itemEl);
+                    });
+                }
+            } else {
+                valueEl.textContent = fieldValue;
+            }
+            
+            fieldItem.appendChild(valueEl);
+            fieldsContainer.appendChild(fieldItem);
+        }
+    }
+    
+    // Display corrected text
+    if (elements.llmEnhancedText) {
+        elements.llmEnhancedText.textContent = result.corrected_text || result.processed_text || '';
+    }
+    
+    // Display confidence notes if present
+    const confidenceSection = document.getElementById('llmConfidenceSection');
+    const confidenceNotes = document.getElementById('llmConfidenceNotes');
+    if (result.confidence_notes && result.confidence_notes.trim()) {
+        if (confidenceSection) confidenceSection.style.display = 'block';
+        if (confidenceNotes) confidenceNotes.textContent = result.confidence_notes;
+    } else {
+        if (confidenceSection) confidenceSection.style.display = 'none';
+    }
+    
+    // Display model used (with vision indicator)
+    if (elements.llmModelUsed) {
+        const visionTag = result.vision_used ? ' [Vision]' : '';
+        elements.llmModelUsed.textContent = (result.model || 'Unknown') + visionTag;
+    }
+    
+    // Display document type
+    const docTypeEl = document.getElementById('llmDocType');
+    if (docTypeEl) {
+        docTypeEl.textContent = result.document_type_name || result.document_type || 'Unknown';
+    }
+}
+
+// =============================================================================
+// SCHEMA MANAGEMENT
+// =============================================================================
+
+function initSchemaManagement() {
+    // Main tab switching
+    const viewerTabBtn = document.getElementById('viewerTabBtn');
+    const llmTabBtn = document.getElementById('llmTabBtn');
+    const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const settingsTabBtn = document.getElementById('settingsTabBtn');
+    
+    if (viewerTabBtn) viewerTabBtn.addEventListener('click', () => switchMainTab('viewer'));
+    if (llmTabBtn) llmTabBtn.addEventListener('click', () => switchMainTab('llm'));
+    if (schemasTabBtn) schemasTabBtn.addEventListener('click', () => switchMainTab('schemas'));
+    if (settingsTabBtn) settingsTabBtn.addEventListener('click', () => switchMainTab('settings'));
+    
+    // LLM controls in Settings tab
+    const pullModelBtn = document.getElementById('pullModelBtn');
+    const llmModelSelect = document.getElementById('llmModelSelect');
+    const startOllamaBtn = document.getElementById('startOllamaBtn');
+    
+    if (pullModelBtn) pullModelBtn.addEventListener('click', pullSelectedModel);
+    if (llmModelSelect) llmModelSelect.addEventListener('change', handleModelSelect);
+    if (startOllamaBtn) startOllamaBtn.addEventListener('click', startOllama);
+    
+    // Process button in LLM Results tab
+    const processLlmBtnMain = document.getElementById('processLlmBtnMain');
+    if (processLlmBtnMain) processLlmBtnMain.addEventListener('click', processWithLlmMain);
+    
+    // Schema management buttons
+    const newSchemaBtn = document.getElementById('newSchemaBtn');
+    const saveSchemaBtn = document.getElementById('saveSchemaBtn');
+    const deleteSchemaBtn = document.getElementById('deleteSchemaBtn');
+    const generateSchemaBtn = document.getElementById('generateSchemaBtn');
+    
+    if (newSchemaBtn) newSchemaBtn.addEventListener('click', createNewSchema);
+    if (saveSchemaBtn) saveSchemaBtn.addEventListener('click', saveCurrentSchema);
+    if (deleteSchemaBtn) deleteSchemaBtn.addEventListener('click', deleteCurrentSchema);
+    if (generateSchemaBtn) generateSchemaBtn.addEventListener('click', generateSchemaWithLLM);
+    
+    // YAML editor change tracking
+    const yamlEditor = document.getElementById('schemaYamlEditor');
+    if (yamlEditor) {
+        yamlEditor.addEventListener('input', () => {
+            state.schemaYamlDirty = true;
+            document.getElementById('saveSchemaBtn').disabled = false;
+        });
+    }
+}
+
+function switchMainTab(tabName) {
+    const viewerTabBtn = document.getElementById('viewerTabBtn');
+    const llmTabBtn = document.getElementById('llmTabBtn');
+    const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const settingsTabBtn = document.getElementById('settingsTabBtn');
+    const viewerTab = document.getElementById('viewerTab');
+    const llmMainTab = document.getElementById('llmMainTab');
+    const schemasTab = document.getElementById('schemasTab');
+    const settingsTab = document.getElementById('settingsTab');
+    
+    // Deactivate all tabs - use classList only, not inline styles
+    [viewerTabBtn, llmTabBtn, schemasTabBtn, settingsTabBtn].forEach(btn => btn?.classList.remove('active'));
+    [viewerTab, llmMainTab, schemasTab, settingsTab].forEach(tab => {
+        if (tab) {
+            tab.classList.remove('active');
+        }
+    });
+    
+    if (tabName === 'viewer') {
+        viewerTabBtn.classList.add('active');
+        viewerTab.classList.add('active');
+    } else if (tabName === 'llm') {
+        llmTabBtn.classList.add('active');
+        llmMainTab.classList.add('active');
+        // Update LLM results tab UI
+        updateLlmResultsTab();
+    } else if (tabName === 'schemas') {
+        schemasTabBtn.classList.add('active');
+        schemasTab.classList.add('active');
+        // Load schemas when switching to tab
+        loadSchemaList();
+    } else if (tabName === 'settings') {
+        settingsTabBtn.classList.add('active');
+        settingsTab.classList.add('active');
+        // Update settings UI
+        updateSettingsUI();
+    }
+}
+
+// =============================================================================
+// SETTINGS TAB FUNCTIONS
+// =============================================================================
+
+function updateSettingsUI() {
+    // Update status indicators in Settings tab
+    const ollamaStatus = document.getElementById('ollamaStatusSettings');
+    const ollamaStatusText = document.getElementById('ollamaStatusTextSettings');
+    const accelIcon = document.getElementById('accelIconSettings');
+    const accelText = document.getElementById('accelTextSettings');
+    const modelSelect = document.getElementById('llmModelSelect');
+    const pullBtn = document.getElementById('pullModelBtn');
+    
+    if (!ollamaStatus) return;
+    
+    if (state.llmStatus.ollamaAvailable) {
+        ollamaStatus.textContent = '🟢';
+        ollamaStatusText.textContent = 'Ollama Online';
+        
+        // Update acceleration info
+        if (state.llmStatus.acceleration) {
+            const accel = state.llmStatus.acceleration;
+            if (accel === 'metal' || accel === 'mps') {
+                accelIcon.textContent = '🍎';
+                accelText.textContent = 'Apple Metal GPU';
+            } else if (accel === 'cuda') {
+                accelIcon.textContent = '🟢';
+                accelText.textContent = 'NVIDIA CUDA';
+            } else if (accel === 'rocm') {
+                accelIcon.textContent = '🔴';
+                accelText.textContent = 'AMD ROCm';
+            } else {
+                accelIcon.textContent = '💻';
+                accelText.textContent = 'CPU Only';
+            }
+        }
+        
+        // Populate model select
+        modelSelect.innerHTML = '';
+        state.llmStatus.models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            // Show vision indicator in dropdown
+            const visionTag = model.supports_vision ? ' 👁️' : '';
+            option.textContent = model.name + visionTag + (model.available ? ' ✓' : ' (not pulled)');
+            option.dataset.available = model.available;
+            option.dataset.vision = model.supports_vision || false;
+            option.dataset.medical = model.name.toLowerCase().includes('meditron') || 
+                                     model.name.toLowerCase().includes('medgemma') ||
+                                     model.name.toLowerCase().includes('medical');
+            modelSelect.appendChild(option);
+        });
+        modelSelect.disabled = false;
+        
+        // Restore or select first available vision model, or first available model
+        if (state.llmStatus.selectedModel) {
+            modelSelect.value = state.llmStatus.selectedModel;
+        } else {
+            const firstVisionAvailable = state.llmStatus.models.find(m => m.available && m.supports_vision);
+            const firstAvailable = firstVisionAvailable || state.llmStatus.models.find(m => m.available);
+            if (firstAvailable) {
+                modelSelect.value = firstAvailable.id;
+                state.llmStatus.selectedModel = firstAvailable.id;
+            }
+        }
+        
+        handleModelSelect();
+        // Hide start button when online
+        const startBtn = document.getElementById('startOllamaBtn');
+        if (startBtn) startBtn.style.display = 'none';
+    } else {
+        ollamaStatus.textContent = '🔴';
+        ollamaStatusText.textContent = 'Ollama Offline';
+        accelIcon.textContent = '⚪';
+        accelText.textContent = 'Not available';
+        modelSelect.innerHTML = '<option value="">Ollama offline</option>';
+        modelSelect.disabled = true;
+        pullBtn.disabled = true;
+        
+        // Show start button when offline
+        const startBtn = document.getElementById('startOllamaBtn');
+        if (startBtn) startBtn.style.display = 'inline-flex';
+    }
+}
+
+function handleModelSelect() {
+    const modelSelect = document.getElementById('llmModelSelect');
+    const pullBtn = document.getElementById('pullModelBtn');
+    
+    if (!modelSelect) return;
+    
+    const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+    const isAvailable = selectedOption?.dataset.available === 'true';
+    const supportsVision = selectedOption?.dataset.vision === 'true';
+    const isMedical = selectedOption?.dataset.medical === 'true';
+    
+    state.llmStatus.selectedModel = modelSelect.value;
+    
+    // Update capability badges
+    updateModelCapabilityBadges(supportsVision, isMedical, isAvailable);
+    
+    // Update pull button
+    pullBtn.disabled = isAvailable;
+    
+    // Update LLM Results tab process button
+    updateLlmResultsTab();
+}
+
+async function startOllama() {
+    const startBtn = document.getElementById('startOllamaBtn');
+    const ollamaStatusText = document.getElementById('ollamaStatusTextSettings');
+    
+    if (!startBtn) return;
+    
+    // Disable button and show loading state
+    startBtn.disabled = true;
+    startBtn.textContent = '⏳ Starting...';
+    if (ollamaStatusText) ollamaStatusText.textContent = 'Starting Ollama...';
+    
+    try {
+        const response = await fetch('/api/llm/start-ollama', { method: 'POST' });
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.detail || 'Failed to start Ollama');
+        }
+        
+        if (result.status === 'started' || result.status === 'already_running') {
+            // Refresh LLM status
+            await checkLlmStatus();
+            updateSettingsUI();
+            updateLlmResultsTab();
+        } else if (result.status === 'starting') {
+            // Poll for status
+            if (ollamaStatusText) ollamaStatusText.textContent = 'Ollama starting...';
+            setTimeout(async () => {
+                await checkLlmStatus();
+                updateSettingsUI();
+                updateLlmResultsTab();
+            }, 3000);
+        }
+    } catch (error) {
+        console.error('Failed to start Ollama:', error);
+        alert('Failed to start Ollama: ' + error.message);
+        if (ollamaStatusText) ollamaStatusText.textContent = 'Ollama Offline';
+    } finally {
+        startBtn.disabled = false;
+        startBtn.textContent = '▶️ Start Ollama';
+    }
+}
+
+function updateLlmResultsTab() {
+    const processBtn = document.getElementById('processLlmBtnMain');
+    const modelDisplay = document.getElementById('llmSelectedModelDisplay');
+    
+    // Update selected model display
+    if (modelDisplay) {
+        const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
+        if (selectedModel && selectedModel.available) {
+            modelDisplay.textContent = selectedModel.name;
+        } else if (state.llmStatus.selectedModel) {
+            modelDisplay.textContent = state.llmStatus.selectedModel + ' (not available)';
+        } else {
+            modelDisplay.textContent = 'No model selected';
+        }
+    }
+    
+    // Update process button state
+    if (processBtn) {
+        const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
+        const isAvailable = selectedModel?.available;
+        processBtn.disabled = !isAvailable || !state.ocrResult;
+    }
+}
+
+async function pullSelectedModel() {
+    const modelSelect = document.getElementById('llmModelSelect');
+    const pullBtn = document.getElementById('pullModelBtn');
+    const progressContainer = document.getElementById('pullProgress');
+    const progressFill = document.getElementById('pullProgressFill');
+    const progressText = document.getElementById('pullProgressText');
+    
+    const modelId = modelSelect.value;
+    if (!modelId) return;
+    
+    pullBtn.disabled = true;
+    progressContainer.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Starting download...';
+    
+    try {
+        const response = await fetch(`/api/llm/pull/${encodeURIComponent(modelId)}/stream`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        if (data.status === 'already_available') {
+                            progressText.textContent = 'Model already available!';
+                            setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
+                            break;
+                        }
+                        
+                        if (data.total && data.completed) {
+                            const percent = Math.round((data.completed / data.total) * 100);
+                            progressFill.style.width = percent + '%';
+                            const completedMB = (data.completed / 1024 / 1024).toFixed(1);
+                            const totalMB = (data.total / 1024 / 1024).toFixed(1);
+                            progressText.textContent = `${completedMB} MB / ${totalMB} MB (${percent}%)`;
+                        } else if (data.status) {
+                            progressText.textContent = data.status;
+                        }
+                        
+                        if (data.status === 'complete' || data.status === 'success') {
+                            progressText.textContent = 'Download complete!';
+                            progressFill.style.width = '100%';
+                            await checkLlmStatus();
+                            updateSettingsUI();
+                            updateLlmResultsTab();
+                            setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
+                        }
+                        
+                        if (data.error) {
+                            progressText.textContent = 'Error: ' + data.error;
+                        }
+                    } catch (e) {}
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Pull failed:', error);
+        progressText.textContent = 'Pull failed: ' + error.message;
+    }
+    
+    pullBtn.disabled = false;
+}
+
+async function processWithLlmMain() {
+    if (!state.ocrResult) {
+        alert('Please run OCR first');
+        return;
+    }
+    
+    const processBtn = document.getElementById('processLlmBtnMain');
+    const placeholder = document.getElementById('llmPlaceholderMain');
+    const resultDiv = document.getElementById('llmResultMain');
+    const loadingDiv = document.getElementById('llmLoadingMain');
+    
+    // Use model from shared state (selected in Settings tab)
+    const modelId = state.llmStatus.selectedModel;
+    
+    processBtn.disabled = true;
+    placeholder.style.display = 'none';
+    resultDiv.style.display = 'none';
+    loadingDiv.style.display = 'flex';
+    
+    try {
+        const textLines = state.ocrResult.text_lines || [];
+        const fullText = textLines.map(line => line.text).join('\n');
+        
+        const documentType = state.ocrResult.document_class?.type_id || 
+                            state.ocrResult.document_class?.class?.toLowerCase() || 
+                            'unknown';
+        
+        // Include image_id for vision-enabled models
+        // Use image_id from OCR result (more reliable) or fall back to selected image
+        const imageId = state.ocrResult?.image_id || state.selectedImageId || null;
+        const requestBody = {
+            text: fullText,
+            model: modelId,
+            document_type: documentType,
+            image_id: imageId,  // Pass image for vision models
+            use_vision: true  // Enable vision processing when available
+        };
+        
+        console.log('[LLM Main] Sending request with image_id:', imageId, 'body:', requestBody);
+        
+        const response = await fetch('/api/llm/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Processing failed');
+        }
+        
+        const result = await response.json();
+        state.llmResult = result;
+        
+        // Log if vision was used
+        console.log('[LLM Main] Result - vision_used:', result.vision_used);
+        
+        displayLlmResultMain(result);
+        
+    } catch (error) {
+        console.error('LLM processing failed:', error);
+        alert('LLM processing failed: ' + error.message);
+        placeholder.style.display = 'flex';
+    } finally {
+        loadingDiv.style.display = 'none';
+        processBtn.disabled = false;
+    }
+}
+
+function displayLlmResultMain(result) {
+    const placeholder = document.getElementById('llmPlaceholderMain');
+    const resultDiv = document.getElementById('llmResultMain');
+    const extractedFieldsDiv = document.getElementById('llmExtractedFieldsMain');
+    const enhancedTextDiv = document.getElementById('llmEnhancedTextMain');
+    const docTypeBadge = document.getElementById('llmDocTypeBadgeMain');
+    const confidenceSection = document.getElementById('llmConfidenceSectionMain');
+    const confidenceNotes = document.getElementById('llmConfidenceNotesMain');
+    const modelUsed = document.getElementById('llmModelUsedMain');
+    const docType = document.getElementById('llmDocTypeMain');
+    
+    placeholder.style.display = 'none';
+    resultDiv.style.display = 'flex';
+    
+    // Display document type badge
+    if (docTypeBadge) {
+        docTypeBadge.textContent = result.document_type_name || result.document_type || '';
+    }
+    
+    // Display extracted fields
+    extractedFieldsDiv.innerHTML = '';
+    if (result.extracted_fields) {
+        for (const [key, value] of Object.entries(result.extracted_fields)) {
+            const fieldDiv = document.createElement('div');
+            fieldDiv.className = 'field-item';
+            
+            if (Array.isArray(value)) {
+                fieldDiv.innerHTML = `<strong>${key}:</strong>`;
+                const listDiv = document.createElement('div');
+                listDiv.className = 'field-list';
+                value.forEach((item, idx) => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'field-list-item';
+                    if (typeof item === 'object') {
+                        itemDiv.innerHTML = Object.entries(item)
+                            .map(([k, v]) => `<span><em>${k}:</em> ${v || '-'}</span>`)
+                            .join(' ');
+                    } else {
+                        itemDiv.textContent = item;
+                    }
+                    listDiv.appendChild(itemDiv);
+                });
+                fieldDiv.appendChild(listDiv);
+            } else {
+                fieldDiv.innerHTML = `<strong>${key}:</strong> ${value || '-'}`;
+            }
+            
+            extractedFieldsDiv.appendChild(fieldDiv);
+        }
+    }
+    
+    // Display corrected text
+    enhancedTextDiv.textContent = result.corrected_text || result.original_text || '';
+    
+    // Display confidence notes
+    if (result.confidence_notes) {
+        confidenceSection.style.display = 'block';
+        confidenceNotes.textContent = result.confidence_notes;
+    } else {
+        confidenceSection.style.display = 'none';
+    }
+    
+    // Display meta info (with vision indicator)
+    const visionTag = result.vision_used ? ' [Vision]' : '';
+    modelUsed.textContent = (result.model || 'Unknown') + visionTag;
+    docType.textContent = result.document_type_name || result.document_type || 'Unknown';
+}
+
+async function loadSchemaList() {
+    try {
+        const response = await fetch('/api/schemas');
+        if (!response.ok) throw new Error('Failed to load schemas');
+        
+        const data = await response.json();
+        state.schemas = data.schemas;
+        
+        renderSchemaList();
+    } catch (error) {
+        console.error('Failed to load schemas:', error);
+    }
+}
+
+function renderSchemaList() {
+    const schemaList = document.getElementById('schemaList');
+    if (!schemaList) return;
+    
+    schemaList.innerHTML = '';
+    
+    state.schemas.forEach(schema => {
+        const item = document.createElement('div');
+        item.className = 'schema-item' + (schema.type_id === state.selectedSchemaId ? ' active' : '');
+        item.innerHTML = `
+            <div class="schema-item-name">${schema.display_name}</div>
+            <div class="schema-item-meta">${schema.field_count} fields • ${schema.type_id}</div>
+        `;
+        item.addEventListener('click', () => selectSchema(schema.type_id));
+        schemaList.appendChild(item);
+    });
+}
+
+async function selectSchema(typeId) {
+    if (state.schemaYamlDirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) {
+            return;
+        }
+    }
+    
+    state.selectedSchemaId = typeId;
+    state.schemaYamlDirty = false;
+    
+    // Update list selection
+    renderSchemaList();
+    
+    // Load schema YAML
+    try {
+        const response = await fetch(`/api/schemas/${typeId}/yaml`);
+        if (!response.ok) throw new Error('Failed to load schema');
+        
+        const data = await response.json();
+        
+        // Show editor
+        document.getElementById('schemaPlaceholder').style.display = 'none';
+        document.getElementById('schemaEditForm').style.display = 'flex';
+        document.getElementById('schemaEditorTitle').textContent = data.filename;
+        document.getElementById('schemaYamlEditor').value = data.yaml;
+        document.getElementById('saveSchemaBtn').disabled = true;
+        document.getElementById('deleteSchemaBtn').disabled = typeId === 'unknown';
+        
+    } catch (error) {
+        console.error('Failed to load schema:', error);
+        alert('Failed to load schema: ' + error.message);
+    }
+}
+
+function createNewSchema() {
+    if (state.schemaYamlDirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) {
+            return;
+        }
+    }
+    
+    state.selectedSchemaId = null;
+    state.schemaYamlDirty = false;
+    
+    // Clear list selection
+    renderSchemaList();
+    
+    // Show editor with template
+    const template = `# New Document Schema
+type_id: new_document
+display_name: New Document Type
+
+clip_prompts:
+  - "a document"
+
+keywords:
+  - document
+
+llm_context: |
+  This is a NEW DOCUMENT TYPE. Describe what to extract here.
+
+fields:
+  - name: example_field
+    type: text
+    description: "Example field description"
+    required: true
+`;
+    
+    document.getElementById('schemaPlaceholder').style.display = 'none';
+    document.getElementById('schemaEditForm').style.display = 'flex';
+    document.getElementById('schemaEditorTitle').textContent = 'New Template';
+    document.getElementById('schemaYamlEditor').value = template;
+    document.getElementById('saveSchemaBtn').disabled = false;
+    document.getElementById('deleteSchemaBtn').disabled = true;
+}
+
+async function saveCurrentSchema() {
+    const yamlContent = document.getElementById('schemaYamlEditor').value;
+    
+    if (!yamlContent.trim()) {
+        alert('Schema content is empty');
+        return;
+    }
+    
+    // Extract type_id from YAML
+    const typeIdMatch = yamlContent.match(/type_id:\s*(\S+)/);
+    const typeId = typeIdMatch ? typeIdMatch[1] : 'new_schema';
+    
+    try {
+        const response = await fetch(`/api/schemas/${typeId}/yaml`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/plain' },
+            body: yamlContent
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to save schema');
+        }
+        
+        const data = await response.json();
+        console.log('Schema saved:', data);
+        
+        state.schemaYamlDirty = false;
+        state.selectedSchemaId = data.type_id;
+        document.getElementById('saveSchemaBtn').disabled = true;
+        
+        // Reload schema list
+        await loadSchemaList();
+        
+        alert('Schema saved successfully!');
+        
+    } catch (error) {
+        console.error('Failed to save schema:', error);
+        alert('Failed to save schema: ' + error.message);
+    }
+}
+
+async function deleteCurrentSchema() {
+    if (!state.selectedSchemaId || state.selectedSchemaId === 'unknown') {
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete the "${state.selectedSchemaId}" schema?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/schemas/${state.selectedSchemaId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to delete schema');
+        }
+        
+        console.log('Schema deleted:', state.selectedSchemaId);
+        
+        state.selectedSchemaId = null;
+        state.schemaYamlDirty = false;
+        
+        // Reset editor
+        document.getElementById('schemaPlaceholder').style.display = 'flex';
+        document.getElementById('schemaEditForm').style.display = 'none';
+        document.getElementById('schemaEditorTitle').textContent = 'Select a template';
+        
+        // Reload schema list
+        await loadSchemaList();
+        
+    } catch (error) {
+        console.error('Failed to delete schema:', error);
+        alert('Failed to delete schema: ' + error.message);
+    }
+}
+
+function updateSchemaGenerateButton() {
+    // Update generate button based on shared model selection
+    const generateBtn = document.getElementById('generateSchemaBtn');
+    if (!generateBtn) return;
+    
+    const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
+    generateBtn.disabled = !selectedModel?.available || !state.llmStatus.ollamaAvailable;
+}
+
+async function generateSchemaWithLLM() {
+    const description = document.getElementById('schemaDescription').value.trim();
+    if (!description) {
+        alert('Please describe the document type you want to create');
+        return;
+    }
+    
+    // Use model from shared state (selected in Settings tab)
+    const modelId = state.llmStatus.selectedModel;
+    const generateBtn = document.getElementById('generateSchemaBtn');
+    const yamlEditor = document.getElementById('schemaYamlEditor');
+    
+    generateBtn.disabled = true;
+    generateBtn.textContent = '⏳ Generating...';
+    
+    // Show editor and clear it for streaming output
+    document.getElementById('schemaPlaceholder').style.display = 'none';
+    document.getElementById('schemaEditForm').style.display = 'flex';
+    document.getElementById('schemaEditorTitle').textContent = 'Generating...';
+    yamlEditor.value = '';
+    
+    try {
+        const response = await fetch('/api/schemas/generate/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                description: description,
+                model: modelId || null
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Generation failed');
+        }
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        
+                        if (data.token) {
+                            // Append token to editor (streaming)
+                            yamlEditor.value += data.token;
+                            // Auto-scroll to bottom
+                            yamlEditor.scrollTop = yamlEditor.scrollHeight;
+                        }
+                        
+                        if (data.done) {
+                            // Final result - update with cleaned YAML
+                            if (data.yaml) {
+                                yamlEditor.value = data.yaml;
+                            }
+                            document.getElementById('schemaEditorTitle').textContent = 
+                                (data.display_name || 'New Schema') + ' (generated)';
+                            
+                            if (data.error) {
+                                console.warn('Schema generation warning:', data.error);
+                            }
+                            
+                            console.log('Schema generated:', data.type_id);
+                        }
+                    } catch (e) {
+                        if (e.message !== 'Unexpected end of JSON input') {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        state.schemaYamlDirty = true;
+        state.selectedSchemaId = null;
+        document.getElementById('saveSchemaBtn').disabled = false;
+        document.getElementById('deleteSchemaBtn').disabled = true;
+        
+    } catch (error) {
+        console.error('Failed to generate schema:', error);
+        alert('Failed to generate schema: ' + error.message);
+        yamlEditor.value = '# Generation failed: ' + error.message;
+    } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = '🤖 Generate';
     }
 }

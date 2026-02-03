@@ -1,0 +1,63 @@
+# Receipt/Invoice Schema - Simplified for List Extraction
+type_id: receipt
+display_name: Receipt / Invoice
+
+clip_prompts:
+  - "a store receipt or sales receipt"
+  - "a pharmacy receipt"
+  - "a purchase receipt with items and prices"
+
+keywords:
+  - total
+  - subtotal
+  - tax
+  - receipt
+  - price
+  - qty
+  - amount
+  - paid
+
+llm_context: |
+  This is a RECEIPT or INVOICE. Your main task is to extract the LIST OF PURCHASED ITEMS with prices.
+  
+  Fix common OCR errors:
+  - "$" may appear as "S", decimal points may be commas
+  - "0" vs "O" confusion in prices
+  
+  For pharmacy receipts, items may include medication names.
+
+fields:
+  - name: store_name
+    type: text
+    description: "Store or pharmacy name"
+    required: true
+
+  - name: transaction_date
+    type: date
+    description: "Date of purchase"
+    required: false
+
+  - name: items
+    type: list
+    description: "List of purchased items. Each item should have: name, quantity, price"
+    required: true
+
+  - name: subtotal
+    type: currency
+    description: "Subtotal before tax"
+    required: false
+
+  - name: tax
+    type: currency
+    description: "Tax amount"
+    required: false
+
+  - name: total
+    type: currency
+    description: "Total amount paid"
+    required: true
+
+  - name: payment_method
+    type: text
+    description: "Payment method (cash, card, etc.)"
+    required: false
