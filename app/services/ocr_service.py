@@ -238,13 +238,14 @@ def recognize_text(image_bytes: bytes) -> dict:
     }
 
 
-def recognize_region(image_bytes: bytes, bbox: list) -> dict:
+def recognize_region(image_bytes: bytes, bbox: list, enforce_boxes: bool = False) -> dict:
     """
     Recognize text in a specified region of an image.
     
     Args:
         image_bytes: Image as bytes
         bbox: Region coordinates [x1, y1, x2, y2]
+        enforce_boxes: If True, skip bbox detection and recognize text directly in the region
         
     Returns:
         dict: OCR results for the specified region
@@ -262,10 +263,22 @@ def recognize_region(image_bytes: bytes, bbox: list) -> dict:
     y2 = min(image.height, y2)
     
     cropped = image.crop((x1, y1, x2, y2))
+    crop_width, crop_height = cropped.size
     
     recognition_predictor, detection_predictor = get_predictors()
     
-    predictions = recognition_predictor([cropped], det_predictor=detection_predictor)
+    if enforce_boxes:
+        # Skip detection - use the entire cropped region as a single bbox
+        # Pass the bbox covering the entire cropped image
+        enforced_bbox = [[0, 0, crop_width, crop_height]]
+        predictions = recognition_predictor(
+            [cropped], 
+            bboxes=[enforced_bbox],
+            det_predictor=None  # No detection needed
+        )
+    else:
+        # Normal flow - detect bboxes first, then recognize
+        predictions = recognition_predictor([cropped], det_predictor=detection_predictor)
     
     if not predictions or len(predictions) == 0:
         return {

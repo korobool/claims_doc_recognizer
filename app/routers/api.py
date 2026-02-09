@@ -53,6 +53,7 @@ class ImageIdRequest(BaseModel):
 class RecognizeRegionRequest(BaseModel):
     image_id: str
     bbox: List[float]
+    enforce_boxes: bool = False  # Skip bbox detection, recognize text directly in the region
 
 
 class NormalizeResponse(BaseModel):
@@ -186,7 +187,7 @@ async def recognize_region_endpoint(request: RecognizeRegionRequest):
     with open(image_info["path"], "rb") as f:
         image_bytes = f.read()
     
-    result = recognize_region(image_bytes, request.bbox)
+    result = recognize_region(image_bytes, request.bbox, enforce_boxes=request.enforce_boxes)
     
     # Include image_id in result for vision LLM processing
     result["image_id"] = image_id

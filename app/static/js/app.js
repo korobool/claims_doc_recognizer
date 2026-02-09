@@ -12,6 +12,7 @@ const state = {
     deviceInfoExpanded: false,
     statusLogExpanded: true,
     usePolygons: false,  // Toggle between bbox (false) and polygon (true) rendering
+    enforceBoxes: false, // Skip bbox detection - recognize text directly in drawn region
     // LLM state
     llmStatus: {
         ollamaAvailable: false,
@@ -148,6 +149,14 @@ function init() {
             if (state.ocrResult) {
                 renderTextOverlay();
             }
+        });
+    }
+    
+    // Enforce Boxes toggle
+    const enforceBoxesCheckbox = document.getElementById('enforceBoxesCheckbox');
+    if (enforceBoxesCheckbox) {
+        enforceBoxesCheckbox.addEventListener('change', (e) => {
+            state.enforceBoxes = e.target.checked;
         });
     }
     
@@ -1474,7 +1483,8 @@ async function processNewBbox(bbox) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 image_id: state.selectedImageId,
-                bbox: bbox
+                bbox: bbox,
+                enforce_boxes: state.enforceBoxes
             })
         });
         
