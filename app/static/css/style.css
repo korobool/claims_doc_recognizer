@@ -756,6 +756,92 @@ body {
     border: 2px solid var(--accent-primary);
 }
 
+/* Polygon overlay styles */
+.polygon-overlay-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.polygon-block {
+    cursor: pointer;
+    pointer-events: auto;
+    transition: all 0.15s ease;
+}
+
+.polygon-block.confidence-low {
+    fill: rgba(239, 68, 68, 0.12);
+    stroke: rgba(239, 68, 68, 0.4);
+    stroke-width: 1;
+}
+
+.polygon-block.confidence-low:hover {
+    fill: rgba(239, 68, 68, 0.2);
+    stroke: rgba(239, 68, 68, 0.6);
+}
+
+.polygon-block.confidence-medium {
+    fill: rgba(245, 158, 11, 0.12);
+    stroke: rgba(245, 158, 11, 0.4);
+    stroke-width: 1;
+}
+
+.polygon-block.confidence-medium:hover {
+    fill: rgba(245, 158, 11, 0.2);
+    stroke: rgba(245, 158, 11, 0.6);
+}
+
+.polygon-block.confidence-high {
+    fill: rgba(34, 197, 94, 0.12);
+    stroke: rgba(34, 197, 94, 0.4);
+    stroke-width: 1;
+}
+
+.polygon-block.confidence-high:hover {
+    fill: rgba(34, 197, 94, 0.2);
+    stroke: rgba(34, 197, 94, 0.6);
+}
+
+.polygon-block.selected {
+    stroke-width: 2;
+}
+
+.polygon-editor-container {
+    background: rgba(255, 255, 255, 0.95);
+    border: 2px solid var(--accent-primary);
+    border-radius: 2px;
+}
+
+/* Toolbar checkbox styles */
+.toolbar-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.toolbar-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+}
+
+.toolbar-checkbox .checkbox-label {
+    white-space: nowrap;
+}
+
+.toolbar-checkbox:hover {
+    color: var(--text-primary);
+}
+
 .inline-editor {
     position: absolute;
     top: 0;

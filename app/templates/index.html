@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Recognition System</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=30">
+    <link rel="stylesheet" href="/static/css/style.css?v=31">
 </head>
 <body>
     <div class="container">
@@ -59,6 +59,13 @@
                         <button class="btn btn-toolbar" id="addBboxBtn" disabled title="Draw custom text region">
                             <span class="btn-icon">✏️</span> Add Region
                         </button>
+                    </div>
+                    <div class="toolbar-separator"></div>
+                    <div class="toolbar-group">
+                        <label class="toolbar-checkbox" title="Toggle between bounding boxes and polygons">
+                            <input type="checkbox" id="usePolygonsCheckbox">
+                            <span class="checkbox-label">Use Polygons</span>
+                        </label>
                     </div>
                     <div class="toolbar-separator"></div>
                     <div class="toolbar-group zoom-toolbar">
@@ -408,6 +415,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=30"></script>
+    <script src="/static/js/app.js?v=31"></script>
 </body>
 </html>

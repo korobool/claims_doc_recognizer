@@ -11,6 +11,7 @@ const state = {
     drawStart: null,
     deviceInfoExpanded: false,
     statusLogExpanded: true,
+    usePolygons: false,  // Toggle between bbox (false) and polygon (true) rendering
     // LLM state
     llmStatus: {
         ollamaAvailable: false,
@@ -138,6 +139,17 @@ function init() {
     elements.zoomSlider.addEventListener('input', handleZoomSlider);
     elements.zoomInBtn.addEventListener('click', () => setZoom(state.zoomLevel + 10));
     elements.zoomOutBtn.addEventListener('click', () => setZoom(state.zoomLevel - 10));
+    
+    // Polygon/Bbox toggle
+    const usePolygonsCheckbox = document.getElementById('usePolygonsCheckbox');
+    if (usePolygonsCheckbox) {
+        usePolygonsCheckbox.addEventListener('change', (e) => {
+            state.usePolygons = e.target.checked;
+            if (state.ocrResult) {
+                renderTextOverlay();
+            }
+        });
+    }
     
     // Keyboard zoom (Ctrl++ / Ctrl+-)
     document.addEventListener('keydown', handleKeyboardZoom);
@@ -924,6 +936,16 @@ function renderTextOverlay() {
     
     const scale = state.imageScale;
     
+    if (state.usePolygons) {
+        // Render using SVG polygons
+        renderPolygonOverlay(scale);
+    } else {
+        // Render using div bounding boxes
+        renderBboxOverlay(scale);
+    }
+}
+
+function renderBboxOverlay(scale) {
     state.ocrResult.text_lines.forEach((line, index) => {
         if (!line.bbox || line.bbox.length < 4) return;
         
@@ -954,14 +976,116 @@ function renderTextOverlay() {
     });
 }
 
+function renderPolygonOverlay(scale) {
+    // Create SVG element
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.classList.add('polygon-overlay-svg');
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.pointerEvents = 'none';
+    
+    state.ocrResult.text_lines.forEach((line, index) => {
+        // Use polygon if available, otherwise fall back to bbox
+        let points;
+        if (line.polygon && line.polygon.length >= 3) {
+            // Polygon is array of [x, y] points
+            points = line.polygon.map(p => `${p[0] * scale},${p[1] * scale}`).join(' ');
+        } else if (line.bbox && line.bbox.length >= 4) {
+            // Convert bbox to polygon points (4 corners)
+            const [x1, y1, x2, y2] = line.bbox;
+            points = `${x1 * scale},${y1 * scale} ${x2 * scale},${y1 * scale} ${x2 * scale},${y2 * scale} ${x1 * scale},${y2 * scale}`;
+        } else {
+            return;
+        }
+        
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', points);
+        polygon.classList.add('polygon-block', getConfidenceClass(line.confidence));
+        polygon.dataset.index = index;
+        polygon.style.pointerEvents = 'auto';
+        
+        // Click - select and highlight in JSON
+        polygon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectLine(index);
+        });
+        
+        // Double-click - open editor (create temporary div for editing)
+        polygon.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            openPolygonEditor(index, polygon);
+        });
+        
+        svg.appendChild(polygon);
+    });
+    
+    elements.textOverlay.appendChild(svg);
+}
+
+function openPolygonEditor(index, polygon) {
+    const line = state.ocrResult.text_lines[index];
+    if (!line) return;
+    
+    // Get bounding box of polygon for positioning
+    const bbox = polygon.getBBox();
+    const scale = state.imageScale;
+    
+    // Create a temporary div for editing
+    const editorContainer = document.createElement('div');
+    editorContainer.className = 'polygon-editor-container';
+    editorContainer.style.position = 'absolute';
+    editorContainer.style.left = `${bbox.x}px`;
+    editorContainer.style.top = `${bbox.y}px`;
+    editorContainer.style.minWidth = `${bbox.width}px`;
+    editorContainer.style.minHeight = `${bbox.height}px`;
+    editorContainer.style.zIndex = '1000';
+    
+    const editor = document.createElement('input');
+    editor.type = 'text';
+    editor.className = 'inline-editor';
+    editor.value = line.text;
+    
+    const saveEdit = () => {
+        line.text = editor.value;
+        updateJsonOutput();
+        highlightJsonLine(index);
+        editorContainer.remove();
+    };
+    
+    const cancelEdit = () => {
+        editorContainer.remove();
+    };
+    
+    editor.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            saveEdit();
+        } else if (e.key === 'Escape') {
+            cancelEdit();
+        }
+    });
+    
+    editor.addEventListener('blur', saveEdit);
+    
+    editorContainer.appendChild(editor);
+    elements.textOverlay.appendChild(editorContainer);
+    
+    editor.focus();
+    editor.select();
+}
+
 function selectLine(index) {
     state.selectedLineIndex = index;
     
-    // Remove selection from all bbox
-    document.querySelectorAll('.bbox-block').forEach(b => b.classList.remove('selected'));
+    // Remove selection from all bbox and polygon blocks
+    document.querySelectorAll('.bbox-block, .polygon-block').forEach(b => b.classList.remove('selected'));
     
-    // Select current
-    const block = document.querySelector(`.bbox-block[data-index="${index}"]`);
+    // Select current (try both bbox and polygon)
+    const block = document.querySelector(`.bbox-block[data-index="${index}"]`) || 
+                  document.querySelector(`.polygon-block[data-index="${index}"]`);
     if (block) {
         block.classList.add('selected');
     }
