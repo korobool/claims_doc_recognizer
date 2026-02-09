@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Recognition System</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=31">
+    <link rel="stylesheet" href="/static/css/style.css?v=32">
 </head>
 <body>
     <div class="container">
@@ -65,6 +65,10 @@
                         <label class="toolbar-checkbox" title="Toggle between bounding boxes and polygons">
                             <input type="checkbox" id="usePolygonsCheckbox">
                             <span class="checkbox-label">Use Polygons</span>
+                        </label>
+                        <label class="toolbar-checkbox" title="Skip bbox detection - recognize text directly in drawn region">
+                            <input type="checkbox" id="enforceBoxesCheckbox">
+                            <span class="checkbox-label">Enforce Boxes</span>
                         </label>
                     </div>
                     <div class="toolbar-separator"></div>
@@ -415,6 +419,6 @@
         </aside>
     </div>
 
-    <script src="/static/js/app.js?v=31"></script>
+    <script src="/static/js/app.js?v=32"></script>
 </body>
 </html>
