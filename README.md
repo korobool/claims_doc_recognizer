@@ -44,6 +44,26 @@ A local web application for document OCR (Optical Character Recognition) with im
 - **LLM Schema Generation**: Generate schemas from natural language descriptions
 - **Field Types**: Text, date, currency, number, list (with nested items)
 
+## Pipeline Demonstration
+
+### Step 1: Document Upload
+![Example 1](ex1.jpg)
+
+### Step 2: Image Deskewing
+![Example 2](ex2.jpg)
+
+### Step 3: OCR Recognition
+![Example 3](ex3.jpg)
+
+### Step 4: Text Overlay & Editing
+![Example 4](ex4.jpg)
+
+### Step 5: LLM Processing
+![Example 5](ex5.jpg)
+
+### Step 6: Structured Data Extraction
+![Example 6](ex6.jpg)
+
 ## Installation
 
 ```bash
