@@ -6,3 +6,6 @@ __pycache__/
 uploads/
 *.egg-info/
 .env
+
+# Windsurf IDE
+.windsurf/
