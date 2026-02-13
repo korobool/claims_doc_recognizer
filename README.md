@@ -64,6 +64,21 @@ A local web application for document OCR (Optical Character Recognition) with im
 ### Step 6: Structured Data Extraction
 ![Example 6](ex6.jpg)
 
+### Step 7: Advanced OCR Features
+![Example 7](ex7.png)
+
+### Step 8: Region-Based Recognition
+![Example 8](ex8.png)
+
+### Step 9: Text Recognition with Confidence Level
+![Example 9](ex9.png)
+
+### Step 10: Document Type Classification and Proper Pipelining
+![Example 10](ex10.png)
+
+### Step 11: Text Recognition + Medical-Aware Terminology Extraction
+![Example 11](ex11.png)
+
 ## Installation
 
 ```bash
