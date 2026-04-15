@@ -1689,21 +1689,13 @@ body {
 
 /* Tab-scoped right panel: the Activity / LLM / OCR stack only makes sense
    while the user is in the Viewer or LLM tabs. On Domain / Templates /
-   Settings we collapse the stack so the main area gets the extra width and
-   the page doesn't feel cluttered with irrelevant controls. The system-bar
-   (CUDA/MPS status) stays visible on every tab because hardware context
-   is always useful. */
-body.tab-domain .rp-stacked-content,
-body.tab-schemas .rp-stacked-content,
-body.tab-settings .rp-stacked-content {
-    display: none;
-}
+   Settings we hide the entire right panel so the main column gets the
+   reclaimed width. Users can still open the viewer tab to see hardware
+   status — it's shown in the system-bar on every visit. */
 body.tab-domain .right-panel,
 body.tab-schemas .right-panel,
 body.tab-settings .right-panel {
-    min-height: 0;
-    flex-basis: 52px;  /* just the system-bar height */
-    max-width: 200px;
+    display: none;
 }
 
 /* Page navigator in the viewer toolbar — prev / indicator / next.
