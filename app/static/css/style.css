@@ -126,10 +126,37 @@ body {
     padding: 12px 20px;
 }
 
-.upload-area .hint {
+/* Secondary "Upload as multipage" affordance — visually lighter so the
+   primary Upload Documents button remains the dominant action. Behaves as a
+   link-style button with a subtle background on hover. */
+.btn-upload-secondary {
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px dashed var(--border-light);
+    color: var(--text-secondary);
     font-size: 12px;
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+.btn-upload-secondary:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.upload-area .hint {
+    font-size: 11px;
     color: var(--text-muted);
     margin-top: 10px;
+    line-height: 1.4;
 }
 
 .image-list {
@@ -1660,23 +1687,41 @@ body {
     letter-spacing: 0.3px;
 }
 
-/* Page navigator in the viewer toolbar — prev / indicator / next. */
+/* Page navigator in the viewer toolbar — prev / indicator / next.
+   Grouped inside a subtle pill so it reads as a single control rather than
+   three unrelated buttons jammed between the toolbar checkboxes. */
 .page-navigator {
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
 }
 .page-navigator .page-indicator {
     font-size: 12px;
     font-weight: 600;
-    color: var(--text-secondary);
-    min-width: 100px;
+    color: var(--text-primary);
+    min-width: 90px;
     text-align: center;
+    letter-spacing: 0.2px;
 }
 .page-navigator .btn {
-    padding: 4px 10px;
+    padding: 2px 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 11px;
+    border-radius: 999px;
+    min-width: 24px;
+    height: 22px;
+}
+.page-navigator .btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--accent-primary);
 }
 .page-navigator .btn:disabled {
-    opacity: 0.35;
+    opacity: 0.25;
     cursor: not-allowed;
 }
 
