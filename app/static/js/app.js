@@ -150,6 +150,9 @@ const elements = {
 document.addEventListener('DOMContentLoaded', init);
 
 function init() {
+    // Start on the viewer tab; the body class drives right-panel visibility.
+    document.body.classList.add('tab-viewer');
+
     // File upload
     elements.fileInput.addEventListener('change', handleFileSelect);
     const fileInputMultipage = document.getElementById('fileInputMultipage');
@@ -2416,6 +2419,14 @@ function switchMainTab(tabName) {
             tab.classList.remove('active');
         }
     });
+
+    // Reflect the active tab on <body> so CSS can hide/show ambient panels
+    // (e.g. the right-side Activity/OCR/LLM stack is only meaningful on
+    // viewer/llm tabs; settings and domain/templates get the full width).
+    document.body.classList.remove(
+        'tab-viewer', 'tab-llm', 'tab-schemas', 'tab-domain', 'tab-settings'
+    );
+    document.body.classList.add(`tab-${tabName}`);
 
     if (tabName === 'viewer') {
         viewerTabBtn.classList.add('active');
