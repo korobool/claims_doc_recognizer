@@ -62,6 +62,12 @@ MULTIPAGE_PDF_PATH = _SAMPLE_DIR / "Епикриза.pdf"            # 2-page PD
 # real samples don't exercise).
 TEXT_LAYER_PDF_PATH = Path(__file__).parent / "assets" / "text_layer_sample.pdf"
 
+# Synthesized 3-page SCANNED PDF — pages are embedded as raster images so the
+# native text layer is empty, forcing Surya OCR on every page. Content is a
+# health-insurance claim packet so the SigLIP classifier still produces a
+# meaningful label.
+SCANNED_MULTIPAGE_PDF_PATH = Path(__file__).parent / "assets" / "scanned_multipage_claim.pdf"
+
 OBSERVE_MS = int(os.environ.get("OBSERVE_MS", "1200"))  # visual pause per step
 
 STEP = 0
@@ -262,6 +268,171 @@ def ensure_text_layer_pdf() -> Path:
     return TEXT_LAYER_PDF_PATH
 
 
+def ensure_scanned_multipage_pdf() -> Path:
+    """Synthesize a 3-page SCANNED health-insurance PDF by rendering each
+    page as a raster image (PIL) and embedding those images in the PDF. The
+    resulting pages have no selectable text, so Surya OCR is forced to run
+    on every page — mirrors what a real desk scanner would produce.
+
+    The form content is plausible enough that the SigLIP classifier routes
+    it through the health_insurance domain prompts downstream.
+    """
+    SCANNED_MULTIPAGE_PDF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if SCANNED_MULTIPAGE_PDF_PATH.exists():
+        return SCANNED_MULTIPAGE_PDF_PATH
+
+    from PIL import Image, ImageDraw, ImageFont
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as pdfcanvas
+
+    W, H = 1240, 1754  # A4 at 150 DPI
+
+    def _font(size: int):
+        for candidate in (
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            try:
+                return ImageFont.truetype(candidate, size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    title_font = _font(36)
+    subtitle_font = _font(22)
+    body_font = _font(18)
+    small_font = _font(14)
+
+    def page_image(title: str, lines: list[str], page_num: int) -> Image.Image:
+        im = Image.new("RGB", (W, H), "white")
+        d = ImageDraw.Draw(im)
+        # Top letterhead
+        d.rectangle([0, 0, W, 110], fill="#1e3a5f")
+        d.text((60, 40), "HEALTHCARE CLAIMS DEPARTMENT", fill="white", font=title_font)
+        d.text((60, 80), "Policy holder claim packet", fill="#a8c0e0", font=subtitle_font)
+
+        # Title
+        y = 160
+        d.text((60, y), title, fill="black", font=title_font)
+        y += 60
+        d.line([(60, y), (W - 60, y)], fill="#666", width=2)
+        y += 30
+
+        for line in lines:
+            if line.startswith("## "):
+                d.text((60, y), line[3:], fill="#1e3a5f", font=subtitle_font)
+                y += 40
+            elif line.startswith("- "):
+                d.text((80, y), "• " + line[2:], fill="black", font=body_font)
+                y += 32
+            elif line.strip() == "":
+                y += 16
+            else:
+                d.text((60, y), line, fill="black", font=body_font)
+                y += 30
+
+        # Footer
+        d.line([(60, H - 80), (W - 60, H - 80)], fill="#888", width=1)
+        d.text(
+            (60, H - 60),
+            f"Claim ID: MC-2026-000421  |  Page {page_num} of 3",
+            fill="#666",
+            font=small_font,
+        )
+        d.text(
+            (W - 400, H - 60),
+            "Confidential — Member Health Records",
+            fill="#666",
+            font=small_font,
+        )
+        return im
+
+    pages = [
+        page_image(
+            "Patient Information & Claim Summary",
+            [
+                "## Patient Details",
+                "Name:         Maria Stoyanova",
+                "Date of birth: 14 March 1982",
+                "Member ID:    HI-2026-000421",
+                "Policy:       Comprehensive Plus",
+                "Plan year:    2026",
+                "",
+                "## Claim Summary",
+                "Claim number: MC-2026-000421",
+                "Incident date: 09 April 2026",
+                "Submitted:    12 April 2026",
+                "Amount claimed: 1,284.50 BGN",
+                "Status:       Under review",
+                "",
+                "## Primary diagnosis",
+                "Acute bronchitis with secondary bacterial infection. Prescribed",
+                "oral antibiotics for 10 days and expectorant syrup. Follow-up",
+                "in 7 days, sooner if symptoms worsen or fever persists.",
+            ],
+            1,
+        ),
+        page_image(
+            "Itemized Medical Expenses",
+            [
+                "## Consultations",
+                "- General practitioner visit:          60.00 BGN",
+                "- Pulmonologist follow-up:             95.00 BGN",
+                "- Chest X-ray (radiography, 2 views): 110.00 BGN",
+                "",
+                "## Laboratory tests",
+                "- Complete blood count (CBC):          28.50 BGN",
+                "- C-reactive protein (CRP):            22.00 BGN",
+                "- Sputum culture and sensitivity:      75.00 BGN",
+                "",
+                "## Pharmacy",
+                "- Amoxicillin 500 mg x 20 capsules:   18.20 BGN",
+                "- Ambroxol 30 mg/5 ml syrup 100 ml:    8.99 BGN",
+                "- Paracetamol 500 mg x 10 tablets:     3.40 BGN",
+                "",
+                "## Total",
+                "Subtotal:                             421.09 BGN",
+                "VAT (20%):                             84.22 BGN",
+                "Grand total:                          505.31 BGN",
+            ],
+            2,
+        ),
+        page_image(
+            "Physician Statement and Authorization",
+            [
+                "## Attending physician",
+                "Dr. Ivan Petrov, MD",
+                "Speciality: Internal medicine",
+                "License number: BG-MED-17742",
+                "Clinic: Sofia Medical Center, Vitosha 118",
+                "",
+                "## Clinical statement",
+                "The patient presented with a 5-day history of productive cough,",
+                "low-grade fever, and chest discomfort. Auscultation revealed",
+                "rhonchi bilaterally. Chest X-ray and laboratory findings were",
+                "consistent with acute bacterial bronchitis. Treatment regimen",
+                "prescribed as outlined in the itemized expenses on page 2.",
+                "",
+                "## Authorization",
+                "I certify that the services listed above were medically",
+                "necessary and correctly recorded. Supporting documentation is",
+                "on file at the clinic and available upon request.",
+                "",
+                "Signature: /Ivan Petrov/       Date: 12 April 2026",
+            ],
+            3,
+        ),
+    ]
+
+    pdf = pdfcanvas.Canvas(str(SCANNED_MULTIPAGE_PDF_PATH), pagesize=(W, H))
+    for im in pages:
+        pdf.drawImage(ImageReader(im), 0, 0, width=W, height=H)
+        pdf.showPage()
+    pdf.save()
+    return SCANNED_MULTIPAGE_PDF_PATH
+
+
 async def step_upload_images(page: Page) -> List[str]:
     """Upload three screenshots as THREE separate documents."""
     log("Step 7: Upload 3 screenshots as independent documents", "step")
@@ -291,9 +462,19 @@ async def step_upload_images(page: Page) -> List[str]:
     return page_ids
 
 
+async def _ensure_viewer_active(page: Page) -> None:
+    """Make sure the Document Viewer tab is the active one before interacting
+    with its toolbar / page navigator. Otherwise those elements live inside a
+    display:none panel and Playwright reports them as not visible."""
+    if not await page.locator("#viewerTab.active").count():
+        await page.click("#viewerTabBtn")
+        await page.wait_for_selector("#viewerTab.active", timeout=5000)
+
+
 async def step_upload_pdf_with_text(page: Page) -> None:
     """Synthetic PDF with a text layer should skip OCR on every page."""
     log("Step 7b: Upload PDF with native text layer (fast path)", "step")
+    await _ensure_viewer_active(page)
     pdf_path = ensure_text_layer_pdf()
 
     # Capture the doc count before so we can pick out the newly added one.
@@ -332,9 +513,79 @@ async def step_upload_pdf_with_text(page: Page) -> None:
     await snap(page, "pdf_with_text_recognized")
 
 
+async def step_upload_scanned_multipage_pdf(page: Page) -> None:
+    """Synthetic 3-page scanned PDF → every page must go through OCR."""
+    log("Step 7c2: Upload 3-page scanned PDF (multipage OCR fallback)", "step")
+    await _ensure_viewer_active(page)
+    pdf_path = ensure_scanned_multipage_pdf()
+
+    before = await page.evaluate("() => Object.keys(state.documents).length")
+    await page.set_input_files("#fileInput", str(pdf_path))
+    await page.wait_for_function(
+        f"() => Object.keys(state.documents).length > {before}", timeout=60000
+    )
+    new_doc = await page.evaluate(
+        """() => {
+            const docs = Object.values(state.documents);
+            const d = docs[docs.length - 1];
+            return d ? {doc_id: d.doc_id, source_kind: d.source_kind, page_count: d.page_count, has_text_layer: d.has_text_layer, filename: d.filename} : null;
+        }"""
+    )
+    assert new_doc and new_doc["source_kind"] == "pdf", f"bad doc: {new_doc}"
+    assert new_doc["page_count"] == 3, f"expected 3 pages, got {new_doc['page_count']}"
+    assert new_doc["has_text_layer"] is False, "scanned multipage should have no text layer"
+    log(
+        f"scanned-multipage: {new_doc['page_count']} pages, no text layer",
+        "pass",
+    )
+    await snap(page, "scanned_multipage_uploaded")
+
+    # Select the new doc and navigate + recognize each page via the real UI.
+    await page.evaluate(f"selectDocument('{new_doc['doc_id']}', 1)")
+    await page.wait_for_selector("#pageNavigator:visible", timeout=5000)
+    indicator = await page.locator("#pageNavigator .page-indicator").text_content()
+    assert "Page 1 of 3" in (indicator or ""), f"bad indicator: {indicator}"
+    log("navigator shows Page 1 of 3 for scanned multipage", "pass")
+    await snap(page, "scanned_multipage_page1")
+
+    for i in range(1, 4):
+        await page.evaluate(f"selectDocument('{new_doc['doc_id']}', {i})")
+        await page.click("#recognizeBtn")
+        # Wait for real OCR to finish: text_lines populated AND used_text_layer
+        # must be false (proves Surya ran, not the fast path).
+        await page.wait_for_function(
+            """() => state.ocrResult
+                    && Array.isArray(state.ocrResult.text_lines)
+                    && state.ocrResult.text_lines.length > 0
+                    && state.ocrResult.used_text_layer === false""",
+            timeout=240_000,
+        )
+        line_count = await page.evaluate("() => state.ocrResult.text_lines.length")
+        log(f"scanned-multipage page {i}: OCR produced {line_count} lines", "pass")
+        if i < 3:
+            await page.click("#pageNavigator .page-next")
+            await page.wait_for_function(
+                f"() => document.querySelector('#pageNavigator .page-indicator').textContent.includes('Page {i + 1} of 3')"
+            )
+    await snap(page, "scanned_multipage_all_recognized")
+
+    # Fire LLM on the whole document: verifies the doc_id aggregation path
+    # works for a scanned multipage (all three pages feeding the LLM via
+    # the per-page OCR results).
+    await page.click("#llmTabBtn")
+    await page.wait_for_selector("#llmMainTab.active", timeout=5000)
+    process_btn = page.locator("#processLlmBtnMain")
+    await expect(process_btn).to_be_enabled()
+    await process_btn.click()
+    await page.wait_for_selector("#llmResultMain:visible", timeout=240_000)
+    await snap(page, "scanned_multipage_llm_result")
+    log("scanned-multipage LLM result displayed (3-page aggregation ok)", "pass")
+
+
 async def step_upload_scanned_pdf(page: Page) -> None:
     """Real scanned PDF → OCR fallback path."""
     log("Step 7c: Upload scanned PDF (OCR fallback)", "step")
+    await _ensure_viewer_active(page)
     if not SCANNED_PDF_PATH.exists():
         log(f"sample missing: {SCANNED_PDF_PATH} — skipping", "fail")
         return
@@ -369,6 +620,7 @@ async def step_upload_scanned_pdf(page: Page) -> None:
 async def step_upload_docx(page: Page) -> None:
     """Real DOCX → text-layer fast path."""
     log("Step 7d: Upload DOCX (text-layer fast path)", "step")
+    await _ensure_viewer_active(page)
     if not DOCX_PATH.exists():
         log(f"sample missing: {DOCX_PATH} — skipping", "fail")
         return
@@ -402,6 +654,7 @@ async def step_upload_multipage_from_screenshots(page: Page) -> None:
     """Upload the three screenshots again, this time stapled into a single
     3-page multipage document via the new Upload Multipage button."""
     log("Step 7e: Upload 3 screenshots as one multipage document", "step")
+    await _ensure_viewer_active(page)
 
     # Replace the native prompt so we don't hang on the name dialog.
     await page.evaluate(
@@ -514,6 +767,7 @@ async def step_recognize_and_llm_multipage(page: Page) -> None:
     bundle. Recognizes each page in turn, then runs LLM on the whole
     document so the server aggregates text across pages."""
     log("Step 12: Recognize + LLM on multipage bundle", "step")
+    await _ensure_viewer_active(page)
     doc = await page.evaluate(
         """() => {
             const d = state.documents[state.selectedDocId];
@@ -673,9 +927,13 @@ async def main() -> int:
                 "restore_health",
             )
 
-            # --- New upload paths: PDF (text layer + scanned), DOCX, multipage ---
+            # --- New upload paths: PDF (text layer + scanned + multipage scanned), DOCX, multipage ---
             await safe(step_upload_pdf_with_text(page), "upload_pdf_text_layer")
             await safe(step_upload_scanned_pdf(page), "upload_scanned_pdf")
+            await safe(
+                step_upload_scanned_multipage_pdf(page),
+                "upload_scanned_multipage_pdf",
+            )
             await safe(step_upload_docx(page), "upload_docx")
             await safe(step_upload_multipage_from_screenshots(page), "upload_multipage")
 
