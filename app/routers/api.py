@@ -688,16 +688,18 @@ async def llm_process_text_stream(request: LLMProcessRequest):
         schema = get_schema(doc_type)
         print(f"[LLM Stream] Document type: {doc_type}, Schema: {schema.display_name if schema else 'None'}")
         
-        # Build extraction prompt
+        # Build extraction prompt. The system prompt picks up the active
+        # domain description so swapping domains takes effect on the next call.
+        from app.services.llm_service import build_system_prompt
         if is_vision:
             base64_image = encode_image_to_base64(image_bytes)
             images = [base64_image]
             prompt = processor._build_vision_prompt(request.text, schema)
-            system_prompt = processor.VISION_SYSTEM_PROMPT
+            system_prompt = build_system_prompt(processor.BASE_VISION_SYSTEM_PROMPT)
         else:
             images = None
             prompt = processor._build_text_prompt(request.text, schema)
-            system_prompt = processor.TEXT_SYSTEM_PROMPT
+            system_prompt = build_system_prompt(processor.BASE_TEXT_SYSTEM_PROMPT)
         
         print(f"[LLM Stream] Prompt length: {len(prompt)} chars")
         
@@ -1038,24 +1040,32 @@ async def generate_schema_with_llm_stream(request: GenerateSchemaRequest):
     elif not use_gemini:
         model_id = LLMModel.DEVSTRAL.value  # Default model
     
-    prompt = f"""Generate a document schema YAML for the following document type:
+    from app.services.domain_service import get_active_domain
+    active_domain = get_active_domain()
+
+    prompt = f"""Generate a document schema YAML for the following document type.
+
+=== DOMAIN CONTEXT: {active_domain.display_name} ===
+{active_domain.description}
+=== END DOMAIN CONTEXT ===
 
 USER DESCRIPTION:
 {request.description}
 
-Generate a YAML schema with:
+Using the domain context above, generate a YAML schema with:
 1. type_id: a short lowercase identifier (e.g., "invoice", "medical_report")
 2. display_name: human-readable name
 3. clip_prompts: 2-3 prompts for image classification
 4. keywords: 5-10 keywords that appear in this document type
-5. llm_context: brief instructions for extracting data from this document type, including common OCR errors to fix
+5. llm_context: brief instructions for extracting data from this document type, including domain-specific OCR errors to fix
 6. fields: list of fields to extract, each with name, type (text/date/currency/list/number), description, required (true/false)
 
 For list-type fields, describe what each item should contain in the description.
+Tailor field choices to the domain context above (e.g. VIN/plate for motor insurance, drug/dosage for health insurance).
 
 Return ONLY valid YAML, no explanations:"""
 
-    print(f"[Schema] Streaming schema generation for: {request.description[:50]}...")
+    print(f"[Schema] Streaming schema generation for: {request.description[:50]}... (domain: {active_domain.domain_id})")
     
     async def stream_generate() -> AsyncGenerator[str, None]:
         """Stream LLM generation as Server-Sent Events."""
@@ -1155,24 +1165,32 @@ async def generate_schema_with_llm(request: GenerateSchemaRequest):
     
     model = LLMModel.from_string(request.model) if request.model else None
     
-    prompt = f"""Generate a document schema YAML for the following document type:
+    from app.services.domain_service import get_active_domain
+    active_domain = get_active_domain()
+
+    prompt = f"""Generate a document schema YAML for the following document type.
+
+=== DOMAIN CONTEXT: {active_domain.display_name} ===
+{active_domain.description}
+=== END DOMAIN CONTEXT ===
 
 USER DESCRIPTION:
 {request.description}
 
-Generate a YAML schema with:
+Using the domain context above, generate a YAML schema with:
 1. type_id: a short lowercase identifier (e.g., "invoice", "medical_report")
 2. display_name: human-readable name
 3. clip_prompts: 2-3 prompts for image classification
 4. keywords: 5-10 keywords that appear in this document type
-5. llm_context: brief instructions for extracting data from this document type, including common OCR errors to fix
+5. llm_context: brief instructions for extracting data from this document type, including domain-specific OCR errors to fix
 6. fields: list of fields to extract, each with name, type (text/date/currency/list/number), description, required (true/false)
 
 For list-type fields, describe what each item should contain in the description.
+Tailor field choices to the domain context above.
 
 Return ONLY valid YAML, no explanations:"""
 
-    print(f"[Schema] Generating schema with LLM for: {request.description[:50]}...")
+    print(f"[Schema] Generating schema with LLM for: {request.description[:50]}... (domain: {active_domain.domain_id})")
     
     result = await client.generate(
         prompt=prompt,
@@ -1225,4 +1243,113 @@ async def reload_all_schemas():
         "status": "reloaded",
         "count": len(schemas),
         "schemas": list(schemas.keys())
+    }
+
+
+# =============================================================================
+# Domain description endpoints
+# =============================================================================
+# A "domain" is the free-form knowledge block injected into LLM prompts so the
+# same codebase can serve different verticals (health insurance, motor
+# insurance, etc.). Multiple domains can coexist; one is marked active.
+
+class SetActiveDomainRequest(BaseModel):
+    domain_id: str
+
+
+@router.get("/domains")
+async def list_all_domains():
+    from app.services.domain_service import list_domains, get_active_domain_id
+    return {
+        "domains": list_domains(),
+        "active_domain_id": get_active_domain_id(),
+    }
+
+
+@router.get("/domains/{domain_id}")
+async def get_domain_details(domain_id: str):
+    from app.services.domain_service import get_domain
+    domain = get_domain(domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail=f"Domain '{domain_id}' not found")
+    return domain.to_dict()
+
+
+@router.get("/domains/{domain_id}/yaml")
+async def get_domain_yaml(domain_id: str):
+    from app.services.domain_service import get_domain
+    domain = get_domain(domain_id)
+    if not domain or not domain.source_file:
+        raise HTTPException(status_code=404, detail=f"Domain '{domain_id}' not found")
+    try:
+        with open(domain.source_file, "r", encoding="utf-8") as f:
+            yaml_content = f.read()
+    except IOError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read domain file: {e}")
+    return Response(content=yaml_content, media_type="text/plain")
+
+
+@router.put("/domains/{domain_id}/yaml")
+async def update_domain_yaml(domain_id: str, request: Request):
+    """Create or update a domain from raw YAML. Body is text/plain."""
+    from app.services.domain_service import save_domain_yaml
+    yaml_content = (await request.body()).decode("utf-8")
+    try:
+        saved = save_domain_yaml(domain_id, yaml_content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    print(f"[Domain] Saved: {saved.domain_id} ({saved.display_name})")
+    return {
+        "status": "saved",
+        "domain_id": saved.domain_id,
+        "display_name": saved.display_name,
+    }
+
+
+@router.delete("/domains/{domain_id}")
+async def delete_domain_endpoint(domain_id: str):
+    from app.services.domain_service import delete_domain, get_domains
+    if len(get_domains()) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last remaining domain")
+    if not delete_domain(domain_id):
+        raise HTTPException(status_code=404, detail=f"Domain '{domain_id}' not found")
+    print(f"[Domain] Deleted: {domain_id}")
+    return {"status": "deleted", "domain_id": domain_id}
+
+
+@router.get("/domain/active")
+async def get_active_domain_info():
+    from app.services.domain_service import get_active_domain, get_active_domain_id
+    domain = get_active_domain()
+    return {
+        "domain_id": get_active_domain_id(),
+        "resolved_domain_id": domain.domain_id,
+        "display_name": domain.display_name,
+        "description": domain.description,
+    }
+
+
+@router.put("/domain/active")
+async def set_active_domain(payload: SetActiveDomainRequest):
+    from app.services.domain_service import get_domain, set_active_domain_id
+    domain = get_domain(payload.domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail=f"Domain '{payload.domain_id}' not found")
+    set_active_domain_id(payload.domain_id)
+    print(f"[Domain] Active domain set to: {payload.domain_id}")
+    return {
+        "status": "ok",
+        "domain_id": domain.domain_id,
+        "display_name": domain.display_name,
+    }
+
+
+@router.post("/domains/reload")
+async def reload_all_domains():
+    from app.services.domain_service import reload_domains
+    domains = reload_domains()
+    return {
+        "status": "reloaded",
+        "count": len(domains),
+        "domains": list(domains.keys()),
     }

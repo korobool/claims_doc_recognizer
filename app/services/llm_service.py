@@ -22,10 +22,23 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from app.config.document_schemas import get_schema, DocumentSchema, FieldSchema
+from app.services.domain_service import get_active_domain, get_active_domain_description
 
 # Check for Gemini API key at module load
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GEMINI_AVAILABLE = bool(GEMINI_API_KEY)
+
+
+def build_system_prompt(base: str) -> str:
+    """Compose a base (domain-neutral) system prompt with the active domain
+    description. The result is what gets sent to the LLM as the `system`
+    message for extraction / normalization calls."""
+    domain = get_active_domain()
+    return (
+        f"{base}\n\n"
+        f"=== DOMAIN KNOWLEDGE: {domain.display_name} ===\n"
+        f"{domain.description}"
+    )
 
 
 # =============================================================================
@@ -198,7 +211,11 @@ class LLMModel(Enum):
 @dataclass
 class LLMConfig:
     """Configuration for LLM service."""
-    ollama_base_url: str = "http://localhost:11434"
+    # Env-driven so the Docker container can point at a host-deployed Ollama
+    # (host.docker.internal:11434) without code changes.
+    ollama_base_url: str = field(
+        default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    )
     default_model: LLMModel = LLMModel.GEMMA4_31B  # Vision-enabled model as default
     default_vision_model: LLMModel = LLMModel.GEMMA4_31B  # Default for multimodal
     timeout: float = 180.0  # LLM inference can be slow, especially for structured extraction
@@ -563,8 +580,10 @@ class LLMPostProcessor:
     - OCR artifact removal
     """
     
-    # System prompt for vision-enabled models (concise, focused on image)
-    VISION_SYSTEM_PROMPT = """You are a medical document processor with vision capabilities.
+    # Base system prompts are intentionally DOMAIN-NEUTRAL. Domain knowledge
+    # (medical, motor, etc.) is injected at call time from the active domain
+    # description managed by app.services.domain_service via build_system_prompt().
+    BASE_VISION_SYSTEM_PROMPT = """You are a document processor with vision capabilities.
 
 You receive TWO sources for the SAME document:
 1. Document IMAGE - you can see it directly
@@ -578,29 +597,28 @@ CRITICAL EXTRACTION RULES:
 - Your job is to MAXIMIZE recall - capture everything, miss nothing
 - Only exclude items if they are clearly OCR artifacts (garbage characters)
 
-Medical terms, drug names, and dosages must be accurate.
 Always respond with valid JSON only."""
 
-    # System prompt for text-only models (more detailed guidance)
-    TEXT_SYSTEM_PROMPT = """You are a medical document processor specialized in OCR correction.
+    BASE_TEXT_SYSTEM_PROMPT = """You are a document processor specialized in OCR correction.
 
-MEDICAL DOMAIN: These documents contain medical terminology, drug names, dosages, and clinical information.
+You will receive OCR output that may contain character-recognition errors. Use
+the domain knowledge below to choose plausible corrections while preserving
+ambiguous spans when in doubt.
 
-Common medical OCR errors:
-- Drug names: Amoxici11in→Amoxicillin, Metr0nidazole→Metronidazole
-- Dosages: 5OOmg→500mg, 1OO→100, 2Omg→20mg
-- Units: rng→mg, rnl→ml, lU→IU
-- Character confusion: 0/O, 1/l/I, 5/S, 8/B, rn/m
-
-Latin medical abbreviations:
-- bid/b.i.d. = twice daily
-- tid/t.i.d. = three times daily
-- qid/q.i.d. = four times daily
-- PRN/prn = as needed
-- PO = by mouth
-- SIG = instructions
+General OCR confusions to watch for: 0/O, 1/l/I, 5/S, 8/B, rn/m.
 
 Always respond with valid JSON only."""
+
+    # Backwards-compatible class-level shims — some call sites still read
+    # `LLMPostProcessor.VISION_SYSTEM_PROMPT` directly. They now resolve to the
+    # domain-composed prompt at attribute access time.
+    @classmethod
+    def get_vision_system_prompt(cls) -> str:
+        return build_system_prompt(cls.BASE_VISION_SYSTEM_PROMPT)
+
+    @classmethod
+    def get_text_system_prompt(cls) -> str:
+        return build_system_prompt(cls.BASE_TEXT_SYSTEM_PROMPT)
 
     def __init__(self, client: OllamaClient = None):
         self.client = client or OllamaClient()
@@ -680,9 +698,9 @@ OCR TEXT (may contain errors):
 ---
 
 TASK:
-1. Fix OCR errors using medical domain knowledge
+1. Fix OCR errors using the domain knowledge in your system prompt
 2. Extract all fields listed above
-3. For medications: ensure drug names, dosages, and instructions are accurate
+3. For list-type fields, capture every item — do not drop entries that look faint
 
 Return JSON only:
 {{"corrected_text": "full corrected text", "extracted_fields": {example_json}}}"""
@@ -775,13 +793,14 @@ Return JSON only:
         print(f"[LLM] Using schema: {schema.display_name} ({len(schema.fields)} fields)")
         print(f"[LLM] Mode: {'VISION' if use_vision else 'TEXT-ONLY'}")
         
-        # Build appropriate prompt based on mode
+        # Build appropriate prompt based on mode. The system prompt is
+        # composed from the domain-neutral base + the active domain description.
         if use_vision:
             prompt = self._build_vision_prompt(text, schema)
-            system_prompt = self.VISION_SYSTEM_PROMPT
+            system_prompt = build_system_prompt(self.BASE_VISION_SYSTEM_PROMPT)
         else:
             prompt = self._build_text_prompt(text, schema)
-            system_prompt = self.TEXT_SYSTEM_PROMPT
+            system_prompt = build_system_prompt(self.BASE_TEXT_SYSTEM_PROMPT)
         
         # Prepare image for vision models
         images = None
@@ -1035,10 +1054,11 @@ class GeminiClient:
 
 class GeminiPostProcessor:
     """LLM post-processor using Gemini API with multimodal (vision) support."""
-    
-    # Gemini is always vision-capable, use concise prompts
-    VISION_SYSTEM_PROMPT = LLMPostProcessor.VISION_SYSTEM_PROMPT
-    
+
+    # Gemini is always vision-capable; reuse the shared base prompt and let
+    # build_system_prompt() compose the active domain in at call time.
+    BASE_VISION_SYSTEM_PROMPT = LLMPostProcessor.BASE_VISION_SYSTEM_PROMPT
+
     def __init__(self, client: GeminiClient = None):
         self.client = client or GeminiClient()
     
@@ -1174,7 +1194,7 @@ Return JSON only:
         print(f"[Gemini] Mode: {'VISION' if use_vision else 'TEXT-ONLY'}")
         
         prompt = self._build_extraction_prompt(text, schema, use_vision)
-        system_prompt = self.VISION_SYSTEM_PROMPT
+        system_prompt = build_system_prompt(self.BASE_VISION_SYSTEM_PROMPT)
         
         # Prepare images for Gemini if provided
         images = None

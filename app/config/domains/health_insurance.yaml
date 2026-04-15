@@ -1,0 +1,71 @@
+domain_id: health_insurance
+display_name: Health Insurance
+description: |
+  You are working with documents from the HEALTH / MEDICAL INSURANCE domain. These
+  documents are produced or received in the course of medical care, pharmacy
+  transactions, and claims handling between patients, providers, pharmacies, and
+  insurers.
+
+  TYPICAL DOCUMENT TYPES
+    - Medical prescriptions (Rx)
+    - Pharmacy receipts / fiscal receipts for medications
+    - Hospital or clinic invoices
+    - Insurance claim forms
+    - Explanation of Benefits (EOB) statements
+    - Medical reports and referrals
+    - Medical certificates and sick notes
+    - Insurance member / policy cards
+    - Lab test results
+
+  DOMAIN TERMINOLOGY
+    - Drug names (generic and brand): Amoxicillin, Metronidazole, Paracetamol,
+      Ibuprofen, Atorvastatin, Omeprazole, Metformin, etc.
+    - Dosages and units: mg, mcg, g, ml, IU, %
+    - Dosage forms: tablet, capsule, syrup, injection, ointment, suspension
+    - Clinical / Latin abbreviations:
+        bid / b.i.d. = twice daily
+        tid / t.i.d. = three times daily
+        qid / q.i.d. = four times daily
+        qd / q.d.   = once daily
+        PRN / prn   = as needed
+        PO          = by mouth
+        IM / IV / SC = injection routes
+        SIG         = patient instructions
+        Rx          = prescription
+    - Insurance terminology: policy number, member ID, group ID, copay,
+      deductible, out-of-pocket maximum, coinsurance, provider, claim number,
+      CPT / ICD codes, NDC codes, plan name, effective date, termination date.
+
+  COMMON OCR ERRORS TO WATCH FOR AND CORRECT
+    - Drug names:
+        Amoxici11in -> Amoxicillin
+        Metr0nidazole -> Metronidazole
+        Paracetam0l -> Paracetamol
+    - Dosages:
+        5OOmg -> 500mg
+        1OO -> 100
+        2Omg -> 20mg
+    - Units:
+        rng -> mg
+        rnl -> ml
+        lU -> IU
+    - Character confusion classes: 0/O, 1/l/I, 5/S, 8/B, rn/m.
+    - Latin abbreviations sometimes get dropped spaces or wrong case
+      (BID vs bid) — preserve the original form when uncertain.
+
+  EXTRACTION PRIORITIES
+    - Patient identifying information (name, DOB, member ID) is sensitive but
+      important for claim matching.
+    - Medication lists must capture name, strength, dosage, frequency, route,
+      and quantity. Never drop a medication because it is faint or partially
+      obscured — note uncertainty instead.
+    - Monetary amounts should be captured with currency and broken into
+      subtotal / tax / total when present.
+    - Dates should be normalized to YYYY-MM-DD when unambiguous; otherwise
+      keep the original form and flag it.
+    - Provider / prescriber name, clinic name, address, and contact info are
+      needed for claim routing.
+
+  TONE
+    - Be precise and conservative. When drug names or dosages are ambiguous,
+      preserve the OCR'd form and flag low confidence rather than guessing.

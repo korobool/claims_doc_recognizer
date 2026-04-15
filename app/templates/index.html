@@ -40,6 +40,9 @@
                 <button class="main-tab" data-tab="schemas" id="schemasTabBtn">
                     <span class="tab-icon">📋</span> Templates
                 </button>
+                <button class="main-tab" data-tab="domain" id="domainTabBtn">
+                    <span class="tab-icon">🌐</span> Domain
+                </button>
                 <button class="main-tab" data-tab="settings" id="settingsTabBtn">
                     <span class="tab-icon">⚙️</span> Settings
                 </button>
@@ -148,7 +151,45 @@
                     </div>
                 </div>
             </div><!-- End schemasTab -->
-            
+
+            <!-- Domain Description Tab -->
+            <div class="main-tab-content" id="domainTab">
+                <div class="schemas-container">
+                    <div class="schemas-sidebar">
+                        <h3>Domains</h3>
+                        <p class="hint">Active domain is injected into LLM prompts for extraction and template generation.</p>
+                        <div class="schema-list" id="domainList">
+                            <!-- Domain items loaded dynamically -->
+                        </div>
+                        <button class="btn btn-primary btn-full" id="newDomainBtn">
+                            ➕ New Domain
+                        </button>
+                    </div>
+                    <div class="schema-editor">
+                        <div class="schema-editor-header">
+                            <h3 id="domainEditorTitle">Select a domain</h3>
+                            <div class="schema-editor-actions">
+                                <button class="btn btn-small btn-primary" id="setActiveDomainBtn" disabled title="Use this domain for LLM calls">✅ Set Active</button>
+                                <button class="btn btn-small" id="saveDomainBtn" disabled>💾 Save</button>
+                                <button class="btn btn-small btn-danger" id="deleteDomainBtn" disabled>🗑️ Delete</button>
+                            </div>
+                        </div>
+
+                        <div class="schema-placeholder" id="domainPlaceholder">
+                            <p>Select a domain from the list or create a new one.</p>
+                            <p class="hint">Active domain: <strong id="activeDomainLabel">—</strong></p>
+                        </div>
+
+                        <div class="schema-edit-form" id="domainEditForm" style="display: none;">
+                            <div class="schema-yaml-section">
+                                <label>Domain YAML (description is the long free-form knowledge block):</label>
+                                <textarea id="domainYamlEditor" class="yaml-editor" spellcheck="false"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- End domainTab -->
+
             <!-- LLM Results Tab -->
             <div class="main-tab-content" id="llmMainTab">
                 <!-- LLM Toolbar -->

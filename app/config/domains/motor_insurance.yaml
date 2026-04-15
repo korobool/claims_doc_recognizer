@@ -1,0 +1,64 @@
+domain_id: motor_insurance
+display_name: Motor Insurance
+description: |
+  You are working with documents from the MOTOR / AUTO INSURANCE domain. These
+  documents are produced or received in the course of insuring vehicles,
+  reporting accidents, and handling claims between drivers, repair shops,
+  insurers, and authorities.
+
+  TYPICAL DOCUMENT TYPES
+    - Accident reports (police and self-declared)
+    - Claim forms
+    - Vehicle registration certificates
+    - Driver's licenses
+    - Insurance policy certificates / Green Card
+    - Repair estimates and invoices from body shops
+    - Towing and storage invoices
+    - Rental car receipts (courtesy car during repair)
+    - Photographs of damage (VIN plates, odometer, plates)
+    - Technical inspection reports (MOT / roadworthiness)
+
+  DOMAIN TERMINOLOGY
+    - Vehicle identifiers: VIN (17 chars), license plate, make, model, year,
+      color, body type, engine number, chassis number, mileage / odometer
+      reading, registration date.
+    - Driver / policyholder identifiers: full name, date of birth, address,
+      driver's license number, license category (A / B / C / D), issue /
+      expiry dates.
+    - Policy fields: policy number, insurer name, agent, coverage type
+      (comprehensive / third-party liability / CASCO), premium, deductible
+      (excess), coverage limits, effective / expiry dates, bonus-malus level,
+      no-claims discount.
+    - Claim fields: claim number, date and time of incident, location (street,
+      city, country), cause, description, weather / road conditions,
+      third-party involved, police report number, injury / fatality flag.
+    - Repair / damage: part name, part number, labor hours, labor rate,
+      material cost, paint, VAT, subtotal, total, currency.
+
+  COMMON OCR ERRORS TO WATCH FOR AND CORRECT
+    - VINs must be 17 characters using the ISO 3779 alphabet (no I, O, Q).
+      Any I/O/Q characters in an OCR'd VIN are almost certainly 1/0/0.
+    - License plates often confuse 0/O, 1/I, 5/S, 8/B, Z/2 — cross-check with
+      the country's plate format if visible.
+    - Dates can appear in mixed European (DD.MM.YYYY), US (MM/DD/YYYY),
+      or ISO formats — preserve the original and also normalize to ISO
+      when unambiguous.
+    - Amounts may use comma or period as decimal separator depending on
+      locale; do not lose trailing zeros.
+    - Accident-report codes and checkboxes are often faint — if a checkbox
+      is near-certain, record it; otherwise flag as unknown.
+
+  EXTRACTION PRIORITIES
+    - Vehicle identification (VIN, plate, make/model, year, color) is the
+      primary key of most motor-insurance records. Never drop it.
+    - Driver and third-party identification including contact info.
+    - Incident metadata: date, time, place, cause, police report number.
+    - Monetary amounts grouped by category: parts, labor, paint, materials,
+      VAT, total, currency.
+    - Coverage type and policy number so claims can be linked to the right
+      policy.
+
+  TONE
+    - Be precise and conservative. Preserve original formats when unsure.
+    - Flag any VIN / plate / policy number that fails a basic format check
+      rather than silently correcting it.

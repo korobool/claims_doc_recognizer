@@ -24,6 +24,11 @@ const state = {
     schemas: [],
     selectedSchemaId: null,
     schemaYamlDirty: false,
+    // Domain management state
+    domains: [],
+    activeDomainId: null,
+    selectedDomainId: null,
+    domainYamlDirty: false,
     // Timing state
     currentTimer: null,
     llmStartTime: null,
@@ -2184,12 +2189,33 @@ function initSchemaManagement() {
     const viewerTabBtn = document.getElementById('viewerTabBtn');
     const llmTabBtn = document.getElementById('llmTabBtn');
     const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const domainTabBtn = document.getElementById('domainTabBtn');
     const settingsTabBtn = document.getElementById('settingsTabBtn');
-    
+
     if (viewerTabBtn) viewerTabBtn.addEventListener('click', () => switchMainTab('viewer'));
     if (llmTabBtn) llmTabBtn.addEventListener('click', () => switchMainTab('llm'));
     if (schemasTabBtn) schemasTabBtn.addEventListener('click', () => switchMainTab('schemas'));
+    if (domainTabBtn) domainTabBtn.addEventListener('click', () => switchMainTab('domain'));
     if (settingsTabBtn) settingsTabBtn.addEventListener('click', () => switchMainTab('settings'));
+
+    // Domain management buttons
+    const newDomainBtn = document.getElementById('newDomainBtn');
+    const saveDomainBtn = document.getElementById('saveDomainBtn');
+    const deleteDomainBtn = document.getElementById('deleteDomainBtn');
+    const setActiveDomainBtn = document.getElementById('setActiveDomainBtn');
+
+    if (newDomainBtn) newDomainBtn.addEventListener('click', createNewDomain);
+    if (saveDomainBtn) saveDomainBtn.addEventListener('click', saveCurrentDomain);
+    if (deleteDomainBtn) deleteDomainBtn.addEventListener('click', deleteCurrentDomain);
+    if (setActiveDomainBtn) setActiveDomainBtn.addEventListener('click', setCurrentDomainActive);
+
+    const domainYamlEditor = document.getElementById('domainYamlEditor');
+    if (domainYamlEditor) {
+        domainYamlEditor.addEventListener('input', () => {
+            state.domainYamlDirty = true;
+            document.getElementById('saveDomainBtn').disabled = false;
+        });
+    }
     
     // LLM controls in Settings tab
     const pullModelBtn = document.getElementById('pullModelBtn');
@@ -2229,20 +2255,22 @@ function switchMainTab(tabName) {
     const viewerTabBtn = document.getElementById('viewerTabBtn');
     const llmTabBtn = document.getElementById('llmTabBtn');
     const schemasTabBtn = document.getElementById('schemasTabBtn');
+    const domainTabBtn = document.getElementById('domainTabBtn');
     const settingsTabBtn = document.getElementById('settingsTabBtn');
     const viewerTab = document.getElementById('viewerTab');
     const llmMainTab = document.getElementById('llmMainTab');
     const schemasTab = document.getElementById('schemasTab');
+    const domainTab = document.getElementById('domainTab');
     const settingsTab = document.getElementById('settingsTab');
-    
+
     // Deactivate all tabs - use classList only, not inline styles
-    [viewerTabBtn, llmTabBtn, schemasTabBtn, settingsTabBtn].forEach(btn => btn?.classList.remove('active'));
-    [viewerTab, llmMainTab, schemasTab, settingsTab].forEach(tab => {
+    [viewerTabBtn, llmTabBtn, schemasTabBtn, domainTabBtn, settingsTabBtn].forEach(btn => btn?.classList.remove('active'));
+    [viewerTab, llmMainTab, schemasTab, domainTab, settingsTab].forEach(tab => {
         if (tab) {
             tab.classList.remove('active');
         }
     });
-    
+
     if (tabName === 'viewer') {
         viewerTabBtn.classList.add('active');
         viewerTab.classList.add('active');
@@ -2256,6 +2284,10 @@ function switchMainTab(tabName) {
         schemasTab.classList.add('active');
         // Load schemas when switching to tab
         loadSchemaList();
+    } else if (tabName === 'domain') {
+        domainTabBtn.classList.add('active');
+        domainTab.classList.add('active');
+        loadDomainList();
     } else if (tabName === 'settings') {
         settingsTabBtn.classList.add('active');
         settingsTab.classList.add('active');
@@ -2977,10 +3009,205 @@ function updateSchemaGenerateButton() {
     // Update generate button based on shared model selection
     const generateBtn = document.getElementById('generateSchemaBtn');
     if (!generateBtn) return;
-    
+
     const selectedModel = state.llmStatus.models?.find(m => m.id === state.llmStatus.selectedModel);
     generateBtn.disabled = !selectedModel?.available || !state.llmStatus.ollamaAvailable;
 }
+
+// =============================================================================
+// DOMAIN MANAGEMENT (Domain tab)
+// =============================================================================
+
+async function loadDomainList() {
+    try {
+        const response = await fetch('/api/domains');
+        if (!response.ok) throw new Error('Failed to load domains');
+        const data = await response.json();
+        state.domains = data.domains || [];
+        state.activeDomainId = data.active_domain_id;
+        renderDomainList();
+        updateActiveDomainLabel();
+    } catch (error) {
+        console.error('Failed to load domains:', error);
+    }
+}
+
+function renderDomainList() {
+    const listEl = document.getElementById('domainList');
+    if (!listEl) return;
+
+    listEl.innerHTML = '';
+    state.domains.forEach(d => {
+        const item = document.createElement('div');
+        item.className = 'schema-item';
+        if (d.domain_id === state.selectedDomainId) item.classList.add('selected');
+        const activeBadge = d.domain_id === state.activeDomainId
+            ? '<span class="doc-type-badge" style="margin-left: 8px;">Active</span>'
+            : '';
+        item.innerHTML = `
+            <div class="schema-item-title">${escapeHtml(d.display_name)}${activeBadge}</div>
+            <div class="schema-item-subtitle">${escapeHtml(d.domain_id)} &middot; ${d.description_length} chars</div>
+        `;
+        item.addEventListener('click', () => selectDomain(d.domain_id));
+        listEl.appendChild(item);
+    });
+}
+
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function updateActiveDomainLabel() {
+    const label = document.getElementById('activeDomainLabel');
+    if (!label) return;
+    const active = state.domains.find(d => d.domain_id === state.activeDomainId);
+    label.textContent = active ? active.display_name : (state.activeDomainId || '—');
+}
+
+async function selectDomain(domainId) {
+    if (state.domainYamlDirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) return;
+    }
+    try {
+        const response = await fetch(`/api/domains/${domainId}/yaml`);
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(formatApiError(err) || `HTTP ${response.status}`);
+        }
+        const yamlContent = await response.text();
+        state.selectedDomainId = domainId;
+        state.domainYamlDirty = false;
+
+        document.getElementById('domainPlaceholder').style.display = 'none';
+        document.getElementById('domainEditForm').style.display = 'flex';
+        const d = state.domains.find(x => x.domain_id === domainId);
+        document.getElementById('domainEditorTitle').textContent = d ? d.display_name : domainId;
+        document.getElementById('domainYamlEditor').value = yamlContent;
+        document.getElementById('saveDomainBtn').disabled = true;
+        document.getElementById('deleteDomainBtn').disabled = state.domains.length <= 1;
+        document.getElementById('setActiveDomainBtn').disabled = (domainId === state.activeDomainId);
+
+        renderDomainList();
+    } catch (error) {
+        console.error('Failed to load domain:', error);
+        alert('Failed to load domain: ' + error.message);
+    }
+}
+
+function createNewDomain() {
+    if (state.domainYamlDirty) {
+        if (!confirm('You have unsaved changes. Discard them?')) return;
+    }
+    state.selectedDomainId = null;
+    state.domainYamlDirty = false;
+
+    const template = `# New Domain
+domain_id: new_domain
+display_name: New Domain
+description: |
+  Describe the knowledge, terminology, typical document types, common OCR
+  errors, and extraction priorities that apply to this domain. This text is
+  injected into the LLM system prompt for every extraction and into the
+  schema-generation prompt when you ask the LLM to create a new document
+  template. Write it as if briefing a new analyst.
+`;
+
+    document.getElementById('domainPlaceholder').style.display = 'none';
+    document.getElementById('domainEditForm').style.display = 'flex';
+    document.getElementById('domainEditorTitle').textContent = 'New Domain';
+    document.getElementById('domainYamlEditor').value = template;
+    document.getElementById('saveDomainBtn').disabled = false;
+    document.getElementById('deleteDomainBtn').disabled = true;
+    document.getElementById('setActiveDomainBtn').disabled = true;
+    renderDomainList();
+}
+
+async function saveCurrentDomain() {
+    const yamlContent = document.getElementById('domainYamlEditor').value;
+    if (!yamlContent.trim()) {
+        alert('Domain YAML is empty');
+        return;
+    }
+
+    const idMatch = yamlContent.match(/domain_id:\s*(\S+)/);
+    const domainId = idMatch ? idMatch[1] : (state.selectedDomainId || 'new_domain');
+
+    try {
+        const response = await fetch(`/api/domains/${domainId}/yaml`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/plain' },
+            body: yamlContent,
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(formatApiError(err) || `HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        state.selectedDomainId = data.domain_id;
+        state.domainYamlDirty = false;
+        document.getElementById('saveDomainBtn').disabled = true;
+        await loadDomainList();
+        alert('Domain saved.');
+    } catch (error) {
+        console.error('Failed to save domain:', error);
+        alert('Failed to save domain: ' + error.message);
+    }
+}
+
+async function deleteCurrentDomain() {
+    if (!state.selectedDomainId) return;
+    if (state.domains.length <= 1) {
+        alert('Cannot delete the last remaining domain.');
+        return;
+    }
+    if (!confirm(`Delete domain "${state.selectedDomainId}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/domains/${state.selectedDomainId}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(formatApiError(err) || `HTTP ${response.status}`);
+        }
+        state.selectedDomainId = null;
+        state.domainYamlDirty = false;
+        document.getElementById('domainEditForm').style.display = 'none';
+        document.getElementById('domainPlaceholder').style.display = 'flex';
+        document.getElementById('domainEditorTitle').textContent = 'Select a domain';
+        await loadDomainList();
+    } catch (error) {
+        console.error('Failed to delete domain:', error);
+        alert('Failed to delete domain: ' + error.message);
+    }
+}
+
+async function setCurrentDomainActive() {
+    if (!state.selectedDomainId) return;
+    try {
+        const response = await fetch('/api/domain/active', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain_id: state.selectedDomainId }),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(formatApiError(err) || `HTTP ${response.status}`);
+        }
+        state.activeDomainId = state.selectedDomainId;
+        document.getElementById('setActiveDomainBtn').disabled = true;
+        renderDomainList();
+        updateActiveDomainLabel();
+    } catch (error) {
+        console.error('Failed to set active domain:', error);
+        alert('Failed to set active domain: ' + error.message);
+    }
+}
+
 
 async function generateSchemaWithLLM() {
     const description = document.getElementById('schemaDescription').value.trim();
