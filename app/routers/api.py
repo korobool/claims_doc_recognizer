@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, AsyncGenerator
@@ -953,32 +953,39 @@ async def update_schema(type_id: str, request: SchemaRequest):
 
 
 @router.put("/schemas/{type_id}/yaml")
-async def update_schema_yaml(type_id: str, yaml_content: str):
-    """Update a schema from raw YAML content."""
+async def update_schema_yaml(type_id: str, request: Request):
+    """Update or create a schema from a raw YAML body.
+
+    Body: text/plain YAML document. If the YAML's `type_id` differs from the
+    URL path, the YAML's value wins (so "save new template" can rename itself
+    via the editor).
+    """
     import yaml
-    
+
+    yaml_content = (await request.body()).decode("utf-8")
+    if not yaml_content.strip():
+        raise HTTPException(status_code=400, detail="Empty request body")
+
     try:
-        # Validate YAML
         data = yaml.safe_load(yaml_content)
-        if not data or not isinstance(data, dict):
-            raise HTTPException(status_code=400, detail="Invalid YAML content")
-        
-        # Use type_id from YAML or URL
-        actual_type_id = data.get("type_id", type_id)
-        
-        # Save to file
-        filepath = SCHEMAS_DIR / f"{actual_type_id}.yaml"
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(yaml_content)
-        
-        # Reload schemas
-        reload_schemas()
-        
-        print(f"[Schema] Saved YAML schema: {actual_type_id} to {filepath}")
-        
-        return {"status": "saved", "type_id": actual_type_id, "filepath": str(filepath)}
     except yaml.YAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
+
+    if not data or not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid YAML: root must be a mapping")
+
+    actual_type_id = data.get("type_id", type_id)
+    if not actual_type_id or not isinstance(actual_type_id, str):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'type_id' in YAML")
+
+    filepath = SCHEMAS_DIR / f"{actual_type_id}.yaml"
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(yaml_content)
+
+    reload_schemas()
+    print(f"[Schema] Saved YAML schema: {actual_type_id} to {filepath}")
+
+    return {"status": "saved", "type_id": actual_type_id, "filepath": str(filepath)}
 
 
 @router.delete("/schemas/{type_id}")

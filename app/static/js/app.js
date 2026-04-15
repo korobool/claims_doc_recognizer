@@ -32,6 +32,26 @@ const state = {
     imageCache: {}
 };
 
+// FastAPI returns validation errors as `detail: [{loc, msg, type}, ...]`.
+// Flatten whatever shape we got into a human-readable string so alerts don't
+// end up showing "[object Object]".
+function formatApiError(err) {
+    if (!err) return '';
+    const d = err.detail;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) {
+        return d.map(e => {
+            if (typeof e === 'string') return e;
+            const loc = Array.isArray(e?.loc) ? e.loc.join('.') : '';
+            const msg = e?.msg || JSON.stringify(e);
+            return loc ? `${loc}: ${msg}` : msg;
+        }).join('; ');
+    }
+    if (d && typeof d === 'object') return JSON.stringify(d);
+    if (err.message) return err.message;
+    return JSON.stringify(err);
+}
+
 // Structure for per-image cached data
 function createImageCacheEntry() {
     return {
@@ -2891,10 +2911,10 @@ async function saveCurrentSchema() {
             headers: { 'Content-Type': 'text/plain' },
             body: yamlContent
         });
-        
+
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to save schema');
+            const error = await response.json().catch(() => ({}));
+            throw new Error(formatApiError(error) || `HTTP ${response.status}`);
         }
         
         const data = await response.json();
