@@ -2951,14 +2951,16 @@ async function saveCurrentSchema() {
         
         const data = await response.json();
         console.log('Schema saved:', data);
-        
+
         state.schemaYamlDirty = false;
-        state.selectedSchemaId = data.type_id;
         document.getElementById('saveSchemaBtn').disabled = true;
-        
-        // Reload schema list
+
+        // Reload list then re-select so the editor's Delete/button states
+        // refresh from a real loaded item rather than staying stuck in the
+        // createNew-template state.
         await loadSchemaList();
-        
+        await selectSchema(data.type_id);
+
         alert('Schema saved successfully!');
         
     } catch (error) {
@@ -3149,10 +3151,13 @@ async function saveCurrentDomain() {
             throw new Error(formatApiError(err) || `HTTP ${response.status}`);
         }
         const data = await response.json();
-        state.selectedDomainId = data.domain_id;
         state.domainYamlDirty = false;
         document.getElementById('saveDomainBtn').disabled = true;
+        // Reload list first so the new domain is discoverable, then re-select
+        // it so the editor's button states (Delete, Set Active) refresh from a
+        // real loaded item — otherwise Delete stays disabled from createNew().
         await loadDomainList();
+        await selectDomain(data.domain_id);
         alert('Domain saved.');
     } catch (error) {
         console.error('Failed to save domain:', error);

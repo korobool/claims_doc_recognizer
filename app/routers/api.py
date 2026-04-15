@@ -691,6 +691,8 @@ async def llm_process_text_stream(request: LLMProcessRequest):
         # Build extraction prompt. The system prompt picks up the active
         # domain description so swapping domains takes effect on the next call.
         from app.services.llm_service import build_system_prompt
+        from app.services.domain_service import get_active_domain
+        active_domain = get_active_domain()
         if is_vision:
             base64_image = encode_image_to_base64(image_bytes)
             images = [base64_image]
@@ -700,6 +702,7 @@ async def llm_process_text_stream(request: LLMProcessRequest):
             images = None
             prompt = processor._build_text_prompt(request.text, schema)
             system_prompt = build_system_prompt(processor.BASE_TEXT_SYSTEM_PROMPT)
+        print(f"[LLM Stream] Active domain: {active_domain.domain_id} ({active_domain.display_name}), system_prompt={len(system_prompt)} chars")
         
         print(f"[LLM Stream] Prompt length: {len(prompt)} chars")
         
@@ -1088,19 +1091,25 @@ Return ONLY valid YAML, no explanations:"""
                     return
             else:
                 # Use Ollama with streaming
+                ollama_payload = {
+                    "model": model_id,
+                    "prompt": prompt,
+                    "stream": True,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 2048,
+                    },
+                }
+                # Gemma 4 defaults to reasoning mode; without think=false all
+                # output tokens go into the hidden thinking channel and the
+                # visible YAML gets truncated to a short tail.
+                if is_thinking_model(model_id):
+                    ollama_payload["think"] = False
                 async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as http_client:
                     async with http_client.stream(
                         "POST",
                         f"{client.base_url}/api/generate",
-                        json={
-                            "model": model_id,
-                            "prompt": prompt,
-                            "stream": True,
-                            "options": {
-                                "temperature": 0.3,
-                                "num_predict": 2048,
-                            }
-                        }
+                        json=ollama_payload,
                     ) as response:
                         if response.status_code != 200:
                             yield f"data: {json.dumps({'error': 'Failed to start generation'})}\n\n"
