@@ -1041,7 +1041,9 @@ async def generate_schema_with_llm_stream(request: GenerateSchemaRequest):
         if model_id is None:
             model_id = request.model  # Use as custom model ID
     elif not use_gemini:
-        model_id = LLMModel.DEVSTRAL.value  # Default model
+        # Match the rest of the app: use the configured default LLM, not a
+        # hard-coded devstral that may not be pulled on this deployment.
+        model_id = get_ollama_client().config.default_model.value
     
     from app.services.domain_service import get_active_domain
     active_domain = get_active_domain()
