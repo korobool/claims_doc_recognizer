@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Document Recognition System",
-    description="Document OCR and classification system powered by Surya OCR and CLIP",
+    description="Document OCR and classification system powered by Surya OCR and SigLIP 2",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -44,7 +44,7 @@ app.include_router(api.router)
 @app.get("/")
 async def root(request: Request):
     """Serve the main application page."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 if __name__ == "__main__":

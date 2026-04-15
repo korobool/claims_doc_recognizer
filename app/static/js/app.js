@@ -97,7 +97,7 @@ const elements = {
     gpuMemory: document.getElementById('gpuMemory'),
     gpuMemoryRow: document.getElementById('gpuMemoryRow'),
     suryaDevice: document.getElementById('suryaDevice'),
-    clipDevice: document.getElementById('clipDevice'),
+    siglipDevice: document.getElementById('siglipDevice'),
     // LLM elements
     jsonTab: document.getElementById('jsonTab'),
     llmTab: document.getElementById('llmTab'),
@@ -1623,21 +1623,21 @@ function updateDeviceInfoUI(info) {
         elements.suryaDevice.className = 'device-value ' + (info.surya_device ? getDeviceStatusClass(info.surya_device) : 'status-pending');
     }
     
-    // Update CLIP device
-    if (elements.clipDevice) {
-        elements.clipDevice.textContent = info.clip_device || 'Pending';
-        elements.clipDevice.className = 'device-value ' + (info.clip_device ? getDeviceStatusClass(info.clip_device) : 'status-pending');
+    // Update SigLIP 2 device
+    if (elements.siglipDevice) {
+        elements.siglipDevice.textContent = info.siglip_device || 'Pending';
+        elements.siglipDevice.className = 'device-value ' + (info.siglip_device ? getDeviceStatusClass(info.siglip_device) : 'status-pending');
     }
-    
+
     // Hide note if models are initialized
     const noteEl = document.getElementById('deviceInfoNote');
-    if (noteEl && info.surya_device && info.clip_device) {
+    if (noteEl && info.surya_device && info.siglip_device) {
         noteEl.style.display = 'none';
     }
-    
+
     // Update status summary in header
     const hasGpu = info.cuda_available || info.mps_available;
-    const activeDevice = info.surya_device || info.clip_device;
+    const activeDevice = info.surya_device || info.siglip_device;
     if (activeDevice && (activeDevice.includes('cuda') || activeDevice.includes('mps'))) {
         if (info.cuda_available) {
             elements.deviceInfoStatus.textContent = 'CUDA Active';

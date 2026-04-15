@@ -61,8 +61,12 @@ def get_image_mime_type(image_bytes: bytes) -> str:
 # Models that support vision/multimodal input
 VISION_CAPABLE_MODELS = {
     # Ollama vision models
+    "gemma4:31b",
+    "gemma4:26b",
+    "gemma4:e4b",
+    "gemma4:e2b",
     "gemma3:27b",
-    "gemma3:12b", 
+    "gemma3:12b",
     "gemma3:4b",
     "llava:34b",
     "llava:13b",
@@ -87,14 +91,24 @@ def is_vision_model(model_id: str) -> bool:
         if model_lower == vision_model or model_lower.startswith(vision_model.split(":")[0]):
             return True
     # Also check for common vision model patterns
-    vision_patterns = ["vision", "llava", "minicpm-v", "moondream", "bakllava", "gemma3"]
+    vision_patterns = ["vision", "llava", "minicpm-v", "moondream", "bakllava", "gemma3", "gemma4"]
     return any(pattern in model_lower for pattern in vision_patterns)
+
+
+def is_thinking_model(model_id: str) -> bool:
+    """Gemma 4 family defaults to reasoning/thinking mode, which consumes output
+    tokens before any visible answer. For structured extraction we want a direct
+    answer, so we disable thinking via Ollama's `think: false` flag."""
+    return model_id.lower().startswith("gemma4")
 
 
 class LLMModel(Enum):
     """Available LLM models for post-processing."""
     # Vision-enabled models (multimodal) - listed first as preferred
-    GEMMA3_27B = "gemma3:27b"           # Google Gemma 3 27B with vision - RECOMMENDED DEFAULT
+    GEMMA4_31B = "gemma4:31b"           # Google Gemma 4 31B (dense) with vision - RECOMMENDED DEFAULT
+    GEMMA4_26B = "gemma4:26b"           # Google Gemma 4 26B (MoE, 3.8B active) with vision
+    GEMMA4_E4B = "gemma4:e4b"           # Google Gemma 4 e4b with vision + audio
+    GEMMA3_27B = "gemma3:27b"           # Google Gemma 3 27B with vision
     GEMMA3_12B = "gemma3:12b"           # Google Gemma 3 12B with vision
     LLAVA_34B = "llava:34b"             # LLaVA 34B - high accuracy
     LLAVA_13B = "llava:13b"             # LLaVA 13B - balanced
@@ -127,6 +141,10 @@ class LLMModel(Enum):
             "devstral": cls.DEVSTRAL,
             "qwen2.5": cls.QWEN_2_5,
             "qwen": cls.QWEN_2_5,
+            "gemma4:31b": cls.GEMMA4_31B,
+            "gemma4:26b": cls.GEMMA4_26B,
+            "gemma4:e4b": cls.GEMMA4_E4B,
+            "gemma4": cls.GEMMA4_31B,  # Default to 31B dense
             "gemma3:27b": cls.GEMMA3_27B,
             "gemma3:12b": cls.GEMMA3_12B,
             "gemma3": cls.GEMMA3_27B,  # Default to 27B
@@ -143,7 +161,7 @@ class LLMModel(Enum):
             "gpt-oss": cls.GPT_OSS,
             "gpt-oss-20b": cls.GPT_OSS,
         }
-        return mapping.get(model_lower, cls.GEMMA3_27B)  # Default to vision-enabled model
+        return mapping.get(model_lower, cls.GEMMA4_31B)  # Default to vision-enabled model
     
     @property
     def display_name(self) -> str:
@@ -151,6 +169,9 @@ class LLMModel(Enum):
         names = {
             LLMModel.DEVSTRAL: "Devstral (24B)",
             LLMModel.QWEN_2_5: "Qwen 2.5 (7B)",
+            LLMModel.GEMMA4_31B: "Gemma 4 (31B Dense) [Vision]",
+            LLMModel.GEMMA4_26B: "Gemma 4 (26B MoE) [Vision]",
+            LLMModel.GEMMA4_E4B: "Gemma 4 (e4b) [Vision+Audio]",
             LLMModel.GEMMA3_27B: "Gemma 3 (27B) [Vision]",
             LLMModel.GEMMA3_12B: "Gemma 3 (12B) [Vision]",
             LLMModel.LLAVA_34B: "LLaVA (34B) [Vision]",
@@ -178,8 +199,8 @@ class LLMModel(Enum):
 class LLMConfig:
     """Configuration for LLM service."""
     ollama_base_url: str = "http://localhost:11434"
-    default_model: LLMModel = LLMModel.GEMMA3_27B  # Vision-enabled model as default
-    default_vision_model: LLMModel = LLMModel.GEMMA3_27B  # Default for multimodal
+    default_model: LLMModel = LLMModel.GEMMA4_31B  # Vision-enabled model as default
+    default_vision_model: LLMModel = LLMModel.GEMMA4_31B  # Default for multimodal
     timeout: float = 180.0  # LLM inference can be slow, especially for structured extraction
     max_tokens: int = 4096
     temperature: float = 0.3  # Lower for more deterministic output
@@ -209,15 +230,16 @@ def select_optimal_model(
     
     # Priority order for vision models (when image is available)
     vision_priority = [
-        "gemma3:27b", "gemma3:12b", "llava:34b", "llava:13b", 
+        "gemma4:31b", "gemma4:26b", "gemma4:e4b",
+        "gemma3:27b", "gemma3:12b", "llava:34b", "llava:13b",
         "llama3.2-vision:11b", "minicpm-v:8b", "llava:7b"
     ]
-    
+
     # Priority for medical documents
-    medical_priority = ["medgemma:latest", "meditron:7b", "gemma3:27b"]
-    
+    medical_priority = ["medgemma:latest", "meditron:7b", "gemma4:31b", "gemma3:27b"]
+
     # Priority for general text processing
-    text_priority = ["devstral:24b", "qwen2.5:7b", "gemma3:27b"]
+    text_priority = ["devstral:24b", "qwen2.5:7b", "gemma4:31b", "gemma3:27b"]
     
     # Check for available models in each category
     available_set = set(m.lower() for m in available_models)
@@ -448,10 +470,13 @@ class OllamaClient:
                 "num_predict": max_tokens,
             }
         }
-        
+
+        if is_thinking_model(model_id):
+            payload["think"] = False
+
         if system_prompt:
             payload["system"] = system_prompt
-        
+
         # Add images for multimodal models (Ollama format)
         if images and model_supports_vision:
             payload["images"] = images

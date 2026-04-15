@@ -4,21 +4,23 @@ from surya.detection import DetectionPredictor
 from surya.foundation import FoundationPredictor
 import io
 import torch
-from transformers import CLIPProcessor, CLIPModel
+from transformers import AutoModel, AutoProcessor
 
 _foundation_predictor = None
 _recognition_predictor = None
 _detection_predictor = None
 
-# CLIP model for image classification
-_clip_model = None
-_clip_processor = None
-_clip_device = None
+# SigLIP 2 zero-shot image classifier (replaces CLIP — stronger accuracy,
+# multilingual, sigmoid loss).
+SIGLIP_MODEL_ID = "google/siglip2-so400m-patch14-384"
+_siglip_model = None
+_siglip_processor = None
+_siglip_device = None
 
 # Device info storage
 _device_info = {
     "surya_device": None,
-    "clip_device": None,
+    "siglip_device": None,
     "cuda_available": False,
     "cuda_version": None,
     "gpu_name": None,
@@ -131,35 +133,35 @@ def print_device_info():
     print(f"All models will use '{device}' for inference.")
     print("="*60 + "\n")
 
-# Class descriptions for CLIP zero-shot classification
-CLIP_CLASS_DESCRIPTIONS = [
+# Zero-shot class prompts for the SigLIP 2 classifier.
+ZS_CLASS_PROMPTS = [
     "a photo of a receipt or invoice with prices and totals",
     "a photo of a medical prescription or medication document",
     "a photo of a form or application document with fields to fill",
     "a photo of a contract or legal agreement document",
-    "a photo of an unknown or unclassified document"
+    "a photo of an unknown or unclassified document",
 ]
 
-CLIP_CLASS_NAMES = ["Receipt", "Medication Prescription", "Form", "Contract", "Undetected"]
+ZS_CLASS_NAMES = ["Receipt", "Medication Prescription", "Form", "Contract", "Undetected"]
 
 
-def get_clip_model():
-    """Lazy initialization of CLIP model with GPU support."""
-    global _clip_model, _clip_processor, _clip_device, _device_info
-    
-    if _clip_model is None:
-        _clip_device = get_device()
-        print(f"[CLIP] Loading model on device: {_clip_device}")
-        
-        _clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        _clip_model = _clip_model.to(_clip_device)
-        _clip_model.eval()
-        _clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        
-        _device_info["clip_device"] = str(_clip_device)
-        print(f"[CLIP] Model loaded successfully on {_clip_device}")
-    
-    return _clip_model, _clip_processor
+def get_siglip_model():
+    """Lazy initialization of the SigLIP 2 zero-shot classifier."""
+    global _siglip_model, _siglip_processor, _siglip_device, _device_info
+
+    if _siglip_model is None:
+        _siglip_device = get_device()
+        print(f"[SigLIP2] Loading {SIGLIP_MODEL_ID} on device: {_siglip_device}")
+
+        _siglip_model = AutoModel.from_pretrained(SIGLIP_MODEL_ID)
+        _siglip_model = _siglip_model.to(_siglip_device)
+        _siglip_model.eval()
+        _siglip_processor = AutoProcessor.from_pretrained(SIGLIP_MODEL_ID)
+
+        _device_info["siglip_device"] = str(_siglip_device)
+        print(f"[SigLIP2] Model loaded successfully on {_siglip_device}")
+
+    return _siglip_model, _siglip_processor
 
 
 def get_predictors():
@@ -228,7 +230,7 @@ def recognize_text(image_bytes: bytes) -> dict:
         
         text_lines.append(line_data)
     
-    # Classify document using hybrid method (CLIP + text)
+    # Classify document using hybrid method (SigLIP 2 + keyword text match)
     classification = classify_document_hybrid(image, text_lines)
     
     return {
@@ -419,44 +421,40 @@ def classify_document(text_lines: list) -> dict:
     }
 
 
-def classify_image_with_clip(image: Image.Image) -> dict:
-    """
-    Classify document image using CLIP zero-shot classification.
-    
-    Args:
-        image: PIL Image
-        
-    Returns:
-        dict: Document class and confidence score
+def classify_image_with_siglip(image: Image.Image) -> dict:
+    """Zero-shot document classification using SigLIP 2.
+
+    SigLIP uses a sigmoid loss, so each class has an independent probability
+    (unlike CLIP's softmax where probabilities sum to 1). We still pick the
+    argmax class, using the sigmoid score as the confidence.
     """
     try:
-        model, processor = get_clip_model()
-        
-        # Prepare inputs and move to device
+        model, processor = get_siglip_model()
+
         inputs = processor(
-            text=CLIP_CLASS_DESCRIPTIONS,
+            text=ZS_CLASS_PROMPTS,
             images=image,
             return_tensors="pt",
-            padding=True
+            padding="max_length",
+            max_length=64,
+            truncation=True,
         )
-        inputs = {k: v.to(_clip_device) for k, v in inputs.items()}
-        
-        # Get predictions
+        inputs = {k: v.to(_siglip_device) for k, v in inputs.items()}
+
         with torch.no_grad():
             outputs = model(**inputs)
             logits_per_image = outputs.logits_per_image
-            probs = logits_per_image.softmax(dim=1)
-        
-        # Find best class
+            probs = torch.sigmoid(logits_per_image)
+
         best_idx = probs.argmax().item()
         best_prob = probs[0][best_idx].item()
-        
+
         return {
-            "class": CLIP_CLASS_NAMES[best_idx],
-            "confidence": round(best_prob, 2)
+            "class": ZS_CLASS_NAMES[best_idx],
+            "confidence": round(best_prob, 2),
         }
     except Exception as e:
-        print(f"CLIP classification error: {e}")
+        print(f"SigLIP2 classification error: {e}")
         return {"class": "Undetected", "confidence": 0.0}
 
 
@@ -468,18 +466,11 @@ def _add_type_id(result: dict) -> dict:
 
 
 def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
+    """Hybrid document classification combining SigLIP 2 (image) and keyword-based
+    text matching. Returns document class, type_id, confidence, and which method
+    produced the winning label.
     """
-    Hybrid document classification combining CLIP (image) and text-based methods.
-    
-    Args:
-        image: PIL Image
-        text_lines: List of recognized text lines
-        
-    Returns:
-        dict: Document class, type_id, and confidence score
-    """
-    # Get image-based classification (CLIP)
-    image_result = classify_image_with_clip(image)
+    image_result = classify_image_with_siglip(image)
     
     # Get text-based classification
     text_result = classify_document(text_lines)
@@ -502,14 +493,14 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
             "method": "text"
         })
     
-    # If CLIP has high confidence result - use it
+    # If the image classifier has high confidence - use it
     if image_result["class"] != "Undetected" and image_result["confidence"] >= 0.3:
         return _add_type_id({
             "class": image_result["class"],
             "confidence": round(image_result["confidence"], 2),
             "method": "image"
         })
-    
+
     # If text-based has any result
     if text_result["class"] != "Undetected":
         return _add_type_id({
@@ -517,8 +508,8 @@ def classify_document_hybrid(image: Image.Image, text_lines: list) -> dict:
             "confidence": round(text_result["confidence"] * 0.7, 2),
             "method": "text"
         })
-    
-    # If CLIP has any result
+
+    # If the image classifier has any result
     if image_result["class"] != "Undetected":
         return _add_type_id({
             "class": image_result["class"],

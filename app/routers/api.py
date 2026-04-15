@@ -10,11 +10,12 @@ import httpx
 from app.services.ocr_service import recognize_text, recognize_region, get_device_info
 from app.services.image_service import normalize_image
 from app.services.llm_service import (
-    get_ollama_client, 
-    get_llm_processor, 
+    get_ollama_client,
+    get_llm_processor,
     LLMModel,
     OllamaClient,
     is_vision_model,
+    is_thinking_model,
     select_optimal_model
 )
 from app.config.document_schemas import (
@@ -197,7 +198,7 @@ async def recognize_region_endpoint(request: RecognizeRegionRequest):
 
 @router.get("/device-info")
 async def device_info():
-    """Get GPU/device information for OCR and CLIP models."""
+    """Get GPU/device information for Surya OCR and the SigLIP 2 classifier."""
     return get_device_info()
 
 
@@ -714,14 +715,21 @@ async def llm_process_text_stream(request: LLMProcessRequest):
                     "num_predict": client.config.max_tokens,
                 }
             }
+            if is_thinking_model(model_id):
+                payload["think"] = False
             if system_prompt:
                 payload["system"] = system_prompt
             if images:
                 payload["images"] = images
-            
+
             print(f"[LLM Stream] Starting generation...")
-            
-            async with httpx.AsyncClient(timeout=client.config.timeout) as http_client:
+
+            # Streaming: no read deadline so slow cold-loads of large vision models
+            # (e.g. first call to gemma4:31b) don't abort before the first token arrives.
+            stream_timeout = httpx.Timeout(
+                connect=10.0, write=30.0, pool=10.0, read=None
+            )
+            async with httpx.AsyncClient(timeout=stream_timeout) as http_client:
                 async with http_client.stream(
                     "POST",
                     f"{client.base_url}/api/generate",
