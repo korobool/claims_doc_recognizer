@@ -1644,6 +1644,40 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: white;
+    margin-left: 8px;
+}
+
+/* Page-count badge on a multipage document row in the sidebar. */
+.page-count-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: var(--accent-secondary, #5b7cfa);
+    color: white;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: 6px;
+    letter-spacing: 0.3px;
+}
+
+/* Page navigator in the viewer toolbar — prev / indicator / next. */
+.page-navigator {
+    align-items: center;
+    gap: 8px;
+}
+.page-navigator .page-indicator {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 100px;
+    text-align: center;
+}
+.page-navigator .btn {
+    padding: 4px 10px;
+}
+.page-navigator .btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
 }
 
 .extracted-fields {

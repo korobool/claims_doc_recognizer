@@ -18,3 +18,5 @@ scipy>=1.10.0
 transformers>=4.45.0,<4.57.0
 httpx>=0.25.0
 pyyaml>=6.0
+pypdfium2>=4.0.0
+python-docx>=1.0.0

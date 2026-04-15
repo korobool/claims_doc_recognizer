@@ -7,8 +7,16 @@ import os
 import json
 import httpx
 
-from app.services.ocr_service import recognize_text, recognize_region, get_device_info
+from app.services.ocr_service import (
+    recognize_text,
+    recognize_region,
+    get_device_info,
+    classify_image_with_siglip,
+    classify_document_hybrid,
+)
 from app.services.image_service import normalize_image
+from app.services import document_service as doc_service
+from PIL import Image as PILImage
 from app.services.llm_service import (
     get_ollama_client,
     get_llm_processor,
@@ -35,16 +43,67 @@ router = APIRouter(prefix="/api", tags=["api"])
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Legacy flat image registry retained for backwards compatibility with old
+# endpoints that pre-date the Document/Page model. New uploads route through
+# `document_service` instead; `_resolve_image_path` below understands both.
 images_store: dict[str, dict] = {}
 
 
+def _resolve_image_path(identifier: str) -> Optional[str]:
+    """Resolve either a new page_id or a legacy image_id to a disk path."""
+    page = doc_service.get_page(identifier)
+    if page:
+        return page.image_path
+    if identifier in images_store:
+        return images_store[identifier].get("path")
+    # Last-resort disk fallback for the old flat layout.
+    fallback = os.path.join(UPLOAD_DIR, f"{identifier}.png")
+    if os.path.exists(fallback):
+        return fallback
+    return None
+
+
+def _resolve_page(identifier: str):
+    """Return the Page object for an identifier, or None if not found."""
+    return doc_service.get_page(identifier)
+
+
 class ImageInfo(BaseModel):
+    """Legacy flat-image shape preserved so the frontend keeps working during
+    the document-model transition. Each page is exposed as one ImageInfo with
+    doc_id set so the UI can group pages under their parent document."""
     id: str
     filename: str
+    doc_id: Optional[str] = None
+    source_kind: Optional[str] = None
+    page_index: Optional[int] = None
+    page_count: Optional[int] = None
+    has_text_layer: Optional[bool] = None
+
+
+class PageSummary(BaseModel):
+    page_id: str
+    doc_id: str
+    index: int
+    has_text_layer: bool
+    width: int
+    height: int
+
+
+class DocumentSummary(BaseModel):
+    doc_id: str
+    filename: str
+    source_kind: str  # "image" | "pdf" | "docx" | "multipage"
+    page_count: int
+    has_text_layer: bool
+    pages: List[PageSummary]
 
 
 class UploadResponse(BaseModel):
-    images: List[ImageInfo]
+    documents: List[DocumentSummary]
+    # Legacy field: one entry per page, flat across all uploaded docs. Keeps
+    # the old frontend upload handler working while it migrates to `documents`.
+    images: List[ImageInfo] = []
 
 
 class ImageIdRequest(BaseModel):
@@ -67,8 +126,9 @@ class LLMProcessRequest(BaseModel):
     text: str
     model: Optional[str] = None
     document_type: Optional[str] = None
-    image_id: Optional[str] = None  # For multimodal/vision processing
-    use_vision: Optional[bool] = True  # Whether to use vision if available
+    image_id: Optional[str] = None  # For single-page vision processing (legacy)
+    doc_id: Optional[str] = None    # For multi-page document processing
+    use_vision: Optional[bool] = True
 
 
 class LLMModelInfo(BaseModel):
@@ -86,92 +146,275 @@ class LLMStatusResponse(BaseModel):
     version: Optional[str] = None
 
 
+def _document_to_summary(doc: doc_service.Document) -> DocumentSummary:
+    return DocumentSummary(
+        doc_id=doc.doc_id,
+        filename=doc.filename,
+        source_kind=doc.source_kind,
+        page_count=doc.page_count,
+        has_text_layer=doc.has_any_text_layer,
+        pages=[
+            PageSummary(
+                page_id=p.page_id,
+                doc_id=p.doc_id,
+                index=p.index,
+                has_text_layer=p.has_text_layer,
+                width=p.width,
+                height=p.height,
+            )
+            for p in doc.pages
+        ],
+    )
+
+
+def _document_to_legacy_images(doc: doc_service.Document) -> List[ImageInfo]:
+    """Flatten a Document's pages into the legacy ImageInfo list the old UI
+    expects. Each page becomes one ImageInfo; doc_id/page_index/page_count
+    let a modern UI group pages by their parent document."""
+    return [
+        ImageInfo(
+            id=p.page_id,
+            filename=(
+                f"{doc.filename} [p.{p.index}/{doc.page_count}]"
+                if doc.page_count > 1
+                else doc.filename
+            ),
+            doc_id=doc.doc_id,
+            source_kind=doc.source_kind,
+            page_index=p.index,
+            page_count=doc.page_count,
+            has_text_layer=p.has_text_layer,
+        )
+        for p in doc.pages
+    ]
+
+
 @router.post("/upload", response_model=UploadResponse)
 async def upload_images(files: List[UploadFile] = File(...)):
-    """Upload one or more images."""
-    uploaded = []
-    
+    """Upload images, PDFs, and/or DOCX files.
+
+    Each uploaded file becomes its own Document:
+      - image -> 1-page Document
+      - pdf   -> N-page Document (one page per PDF page); per-page text layer
+                 is captured and downstream OCR is skipped for pages that
+                 already have embedded text.
+      - docx  -> 1-page Document; text is extracted natively.
+
+    To *group* multiple files into a single multi-page document, use the
+    sibling endpoint /api/upload/multipage instead.
+    """
+    documents: List[doc_service.Document] = []
+
     for file in files:
-        if not file.content_type or not file.content_type.startswith("image/"):
-            continue
-        
-        image_id = str(uuid.uuid4())
         content = await file.read()
-        
-        file_path = os.path.join(UPLOAD_DIR, f"{image_id}.png")
-        with open(file_path, "wb") as f:
-            f.write(content)
-        
-        images_store[image_id] = {
-            "filename": file.filename,
-            "path": file_path,
-            "original_path": file_path
-        }
-        
-        uploaded.append(ImageInfo(id=image_id, filename=file.filename))
-    
-    if not uploaded:
-        raise HTTPException(status_code=400, detail="No valid images uploaded")
-    
-    return UploadResponse(images=uploaded)
+        filename = file.filename or "upload"
+        kind = doc_service.classify_upload(filename, content)
+        try:
+            if kind == "pdf":
+                doc = doc_service.ingest_pdf(filename, content)
+            elif kind == "docx":
+                doc = doc_service.ingest_docx(filename, content)
+            elif kind == "image":
+                doc = doc_service.ingest_image(filename, content)
+            else:
+                print(f"[Upload] skipping unsupported file: {filename} ({file.content_type})")
+                continue
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"{filename}: {e}")
+        except Exception as e:
+            print(f"[Upload] ingest failed for {filename}: {e}")
+            raise HTTPException(status_code=500, detail=f"{filename}: {e}")
+        documents.append(doc)
+        # Mirror every page into the legacy store so old lookups resolve.
+        for p in doc.pages:
+            images_store[p.page_id] = {"path": p.image_path, "filename": file.filename}
+        print(f"[Upload] {kind}: {filename} -> doc={doc.doc_id} pages={doc.page_count}")
+
+    if not documents:
+        raise HTTPException(status_code=400, detail="No supported files uploaded")
+
+    summaries = [_document_to_summary(d) for d in documents]
+    legacy_images: List[ImageInfo] = []
+    for d in documents:
+        legacy_images.extend(_document_to_legacy_images(d))
+    return UploadResponse(documents=summaries, images=legacy_images)
+
+
+@router.post("/upload/multipage", response_model=UploadResponse)
+async def upload_multipage(files: List[UploadFile] = File(...), name: Optional[str] = None):
+    """Upload multiple files and staple them into a single multi-page document.
+
+    Useful when screenshots are sequential pages of the same original document,
+    or when a cover page PDF needs to be combined with a scan.
+    """
+    file_tuples: List[tuple] = []
+    for file in files:
+        content = await file.read()
+        filename = file.filename or "page"
+        kind = doc_service.classify_upload(filename, content)
+        if kind == "unsupported":
+            print(f"[Upload multipage] skipping unsupported: {filename}")
+            continue
+        file_tuples.append((filename, content))
+
+    if not file_tuples:
+        raise HTTPException(status_code=400, detail="No supported files in multipage upload")
+
+    display_name = name or f"Multipage document ({len(file_tuples)} files)"
+    try:
+        doc = doc_service.ingest_multipage(display_name, file_tuples)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"[Upload multipage] failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    for p in doc.pages:
+        images_store[p.page_id] = {"path": p.image_path, "filename": display_name}
+    print(f"[Upload multipage] {display_name} -> doc={doc.doc_id} pages={doc.page_count}")
+    return UploadResponse(
+        documents=[_document_to_summary(doc)],
+        images=_document_to_legacy_images(doc),
+    )
+
+
+@router.get("/document/{doc_id}")
+async def get_document_info(doc_id: str):
+    doc = doc_service.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
+    return _document_to_summary(doc).model_dump()
+
+
+@router.delete("/document/{doc_id}")
+async def delete_document_endpoint(doc_id: str):
+    doc = doc_service.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
+    # Also drop legacy mirror entries.
+    for p in doc.pages:
+        images_store.pop(p.page_id, None)
+    doc_service.delete_document(doc_id)
+    return {"status": "deleted", "doc_id": doc_id}
 
 
 @router.post("/normalize", response_model=NormalizeResponse)
 async def normalize(request: ImageIdRequest):
     """Normalize image orientation (deskew text)."""
     image_id = request.image_id
-    
-    if image_id not in images_store:
+
+    path = _resolve_image_path(image_id)
+    if not path:
         raise HTTPException(status_code=404, detail="Image not found")
-    
-    image_info = images_store[image_id]
-    
-    with open(image_info["path"], "rb") as f:
+
+    with open(path, "rb") as f:
         image_bytes = f.read()
-    
+
     normalized_bytes, angle = normalize_image(image_bytes)
-    
-    normalized_path = os.path.join(UPLOAD_DIR, f"{image_id}_normalized.png")
+
+    # Write normalized output alongside the original so re-renders pick it up.
+    normalized_path = os.path.join(os.path.dirname(path), f"{image_id}_normalized.png")
     with open(normalized_path, "wb") as f:
         f.write(normalized_bytes)
-    
-    images_store[image_id]["path"] = normalized_path
-    
+
+    # Update both registries so either resolution path sees the new file.
+    page = _resolve_page(image_id)
+    if page:
+        page.image_path = normalized_path
+    if image_id in images_store:
+        images_store[image_id]["path"] = normalized_path
+    else:
+        images_store[image_id] = {"path": normalized_path, "filename": f"{image_id}.png"}
+
     return NormalizeResponse(image_id=image_id, normalized=True, angle=angle)
+
+
+def _synth_text_layer_result(page: doc_service.Page) -> dict:
+    """Build a Surya-shaped response from a page's native text layer, so the
+    downstream UI can render it identically to OCR output."""
+    text = (page.text_layer or "").strip()
+    lines = [line for line in text.splitlines() if line.strip()]
+    # Synthesize proportional bboxes so the overlay stays roughly aligned.
+    W = page.width or 1000
+    H = page.height or 1400
+    if lines:
+        line_h = max(20.0, H / max(len(lines), 1))
+        text_lines = []
+        for i, ln in enumerate(lines):
+            y0 = i * line_h
+            y1 = y0 + line_h * 0.9
+            text_lines.append(
+                {
+                    "text": ln,
+                    "confidence": 1.0,
+                    "bbox": [float(W * 0.05), float(y0), float(W * 0.95), float(y1)],
+                }
+            )
+    else:
+        text_lines = []
+
+    # Run the hybrid classifier using the rendered page + text layer so domain
+    # routing still works for PDF/DOCX uploads.
+    try:
+        with PILImage.open(page.image_path) as im:
+            im_rgb = im.convert("RGB") if im.mode != "RGB" else im.copy()
+        classification = classify_document_hybrid(im_rgb, text_lines)
+    except Exception as e:
+        print(f"[Recognize] classification fallback failed for {page.page_id}: {e}")
+        classification = {"class": "Undetected", "confidence": 0.0, "type_id": "unknown"}
+
+    return {
+        "text_lines": text_lines,
+        "image_bbox": [0.0, 0.0, float(W), float(H)],
+        "document_class": classification,
+        "image_id": page.page_id,
+        "used_text_layer": True,
+        "page_id": page.page_id,
+        "doc_id": page.doc_id,
+        "text": text,
+    }
 
 
 @router.post("/recognize")
 async def recognize(request: ImageIdRequest):
-    """Recognize text in image using Surya OCR."""
+    """Recognize text in a page.
+
+    Fast path: if the identifier is a Page with a native text layer (PDF
+    with embedded OCR, DOCX), return a synthesized result built from that
+    text layer instead of running Surya. Otherwise fall back to Surya OCR.
+    """
     image_id = request.image_id
-    
-    if image_id not in images_store:
+
+    # Fast path: native text layer available → skip Surya entirely.
+    page = _resolve_page(image_id)
+    if page and page.has_text_layer:
+        print(f"[Recognize] page {image_id} has text layer, skipping OCR")
+        result = _synth_text_layer_result(page)
+        return result
+
+    path = _resolve_image_path(image_id)
+    if not path:
         raise HTTPException(status_code=404, detail="Image not found")
-    
-    image_info = images_store[image_id]
-    
-    with open(image_info["path"], "rb") as f:
+    with open(path, "rb") as f:
         image_bytes = f.read()
-    
+
     result = recognize_text(image_bytes)
-    
-    # Include image_id in result for vision LLM processing
     result["image_id"] = image_id
-    
+    result["used_text_layer"] = False
+    if page:
+        result["page_id"] = page.page_id
+        result["doc_id"] = page.doc_id
     return result
 
 
 @router.get("/image/{image_id}")
 async def get_image(image_id: str):
-    """Retrieve image by ID."""
-    if image_id not in images_store:
+    """Retrieve page/image bytes by ID (page_id or legacy image_id)."""
+    path = _resolve_image_path(image_id)
+    if not path:
         raise HTTPException(status_code=404, detail="Image not found")
-    
-    image_info = images_store[image_id]
-    
-    with open(image_info["path"], "rb") as f:
+    with open(path, "rb") as f:
         image_bytes = f.read()
-    
     return Response(content=image_bytes, media_type="image/png")
 
 
@@ -179,20 +422,15 @@ async def get_image(image_id: str):
 async def recognize_region_endpoint(request: RecognizeRegionRequest):
     """Recognize text in a specified region of the image."""
     image_id = request.image_id
-    
-    if image_id not in images_store:
+    path = _resolve_image_path(image_id)
+    if not path:
         raise HTTPException(status_code=404, detail="Image not found")
-    
-    image_info = images_store[image_id]
-    
-    with open(image_info["path"], "rb") as f:
+
+    with open(path, "rb") as f:
         image_bytes = f.read()
-    
+
     result = recognize_region(image_bytes, request.bbox, enforce_boxes=request.enforce_boxes)
-    
-    # Include image_id in result for vision LLM processing
     result["image_id"] = image_id
-    
     return result
 
 
@@ -585,30 +823,80 @@ async def llm_process_text_stream(request: LLMProcessRequest):
     async def generate_stream() -> AsyncGenerator[str, None]:
         nonlocal request
         
-        print(f"[LLM Stream] Starting stream for model: {request.model}, image_id: {request.image_id}")
-        
-        # Load image bytes if image_id is provided
-        image_bytes = None
-        if request.image_id and request.use_vision:
-            image_path = None
-            
-            if request.image_id in images_store:
-                image_path = images_store[request.image_id]["path"]
-            else:
-                fallback_path = os.path.join(UPLOAD_DIR, f"{request.image_id}.png")
-                if os.path.exists(fallback_path):
-                    image_path = fallback_path
-                    images_store[request.image_id] = {"path": fallback_path, "filename": f"{request.image_id}.png"}
-            
-            if image_path:
-                try:
-                    with open(image_path, "rb") as f:
-                        image_bytes = f.read()
-                    print(f"[LLM Stream] Loaded image: {len(image_bytes)} bytes")
-                except Exception as e:
-                    print(f"[LLM Stream] ERROR loading image: {e}")
-                    yield f"data: {json.dumps({'status': 'error', 'error': f'Could not load image: {e}'})}\n\n"
-                    return
+        print(
+            f"[LLM Stream] Starting stream for model: {request.model}, "
+            f"image_id: {request.image_id}, doc_id: {request.doc_id}"
+        )
+
+        # Resolve target document/pages. When doc_id is supplied we operate on
+        # the full multi-page document: aggregated text layers across all pages
+        # go into the prompt and each page image is sent to vision models that
+        # accept multiple images. Otherwise we fall back to the legacy
+        # single-page path (image_id).
+        target_doc = None
+        target_pages: List[doc_service.Page] = []
+        if request.doc_id:
+            target_doc = doc_service.get_document(request.doc_id)
+            if not target_doc:
+                yield f"data: {json.dumps({'status': 'error', 'error': f'Document {request.doc_id} not found'})}\n\n"
+                return
+            target_pages = target_doc.pages
+        elif request.image_id:
+            page = _resolve_page(request.image_id)
+            if page:
+                # Expand to the full document so multi-page context isn't lost
+                # just because the UI selected one of its pages.
+                target_doc = doc_service.get_document(page.doc_id)
+                if target_doc:
+                    target_pages = target_doc.pages
+
+        # Aggregated text (text layers + the request.text the client already
+        # collected from Recognize runs) is what the LLM sees.
+        aggregated_text = request.text or ""
+        if target_pages:
+            page_texts: List[str] = []
+            for p in target_pages:
+                if p.has_text_layer:
+                    page_texts.append(f"=== Page {p.index} (native text) ===\n{p.text_layer.strip()}")
+            if page_texts:
+                aggregated = "\n\n".join(page_texts)
+                aggregated_text = (aggregated_text + "\n\n" if aggregated_text else "") + aggregated
+            print(
+                f"[LLM Stream] Document mode: doc={target_doc.doc_id if target_doc else None}, "
+                f"pages={len(target_pages)}, text_len={len(aggregated_text)}"
+            )
+
+        # Collect vision image bytes. For multi-page docs we send every page
+        # to vision-capable models (Ollama accepts a list of base64 images).
+        image_bytes = None  # back-compat: the first image still populated for old callsites
+        image_bytes_list: List[bytes] = []
+        if request.use_vision:
+            if target_pages:
+                for p in target_pages:
+                    try:
+                        with open(p.image_path, "rb") as f:
+                            image_bytes_list.append(f.read())
+                    except Exception as e:
+                        print(f"[LLM Stream] failed to read page {p.page_id}: {e}")
+            elif request.image_id:
+                path = _resolve_image_path(request.image_id)
+                if path:
+                    try:
+                        with open(path, "rb") as f:
+                            image_bytes_list.append(f.read())
+                    except Exception as e:
+                        print(f"[LLM Stream] ERROR loading image: {e}")
+                        yield f"data: {json.dumps({'status': 'error', 'error': f'Could not load image: {e}'})}\n\n"
+                        return
+
+            if image_bytes_list:
+                image_bytes = image_bytes_list[0]
+                print(
+                    f"[LLM Stream] Loaded {len(image_bytes_list)} image(s), "
+                    f"first={len(image_bytes)} bytes"
+                )
+        # The rest of this function uses `request.text`; swap in aggregated.
+        request.text = aggregated_text
         
         # Determine model and mode
         model_id = request.model
@@ -694,15 +982,21 @@ async def llm_process_text_stream(request: LLMProcessRequest):
         from app.services.domain_service import get_active_domain
         active_domain = get_active_domain()
         if is_vision:
-            base64_image = encode_image_to_base64(image_bytes)
-            images = [base64_image]
+            # For multi-page docs, send every page image. Ollama's /api/generate
+            # accepts a list of base64 images and routes them all to the vision
+            # model; gemma4:31b handles this fine at reasonable page counts.
+            images = [encode_image_to_base64(b) for b in image_bytes_list] if image_bytes_list else [encode_image_to_base64(image_bytes)]
             prompt = processor._build_vision_prompt(request.text, schema)
             system_prompt = build_system_prompt(processor.BASE_VISION_SYSTEM_PROMPT)
         else:
             images = None
             prompt = processor._build_text_prompt(request.text, schema)
             system_prompt = build_system_prompt(processor.BASE_TEXT_SYSTEM_PROMPT)
-        print(f"[LLM Stream] Active domain: {active_domain.domain_id} ({active_domain.display_name}), system_prompt={len(system_prompt)} chars")
+        print(
+            f"[LLM Stream] Active domain: {active_domain.domain_id} "
+            f"({active_domain.display_name}), system_prompt={len(system_prompt)} chars, "
+            f"images={len(images) if images else 0}"
+        )
         
         print(f"[LLM Stream] Prompt length: {len(prompt)} chars")
         

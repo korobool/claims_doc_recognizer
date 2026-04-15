@@ -15,11 +15,15 @@
                     <h2>Document Library</h2>
                 </div>
                 <div class="upload-area" id="uploadArea">
-                    <input type="file" id="fileInput" multiple accept="image/*" hidden>
+                    <input type="file" id="fileInput" multiple accept="image/*,application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx" hidden>
+                    <input type="file" id="fileInputMultipage" multiple accept="image/*,application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx" hidden>
                     <button class="btn btn-primary btn-upload" onclick="document.getElementById('fileInput').click()">
                         <span class="btn-icon">+</span> Upload Documents
                     </button>
-                    <p class="hint">or drag and drop files here</p>
+                    <button class="btn btn-secondary btn-upload" id="uploadMultipageBtn" onclick="document.getElementById('fileInputMultipage').click()" title="Staple multiple files into a single multi-page document">
+                        <span class="btn-icon">📚</span> Upload Multipage
+                    </button>
+                    <p class="hint">Images, PDFs, DOCX — drag and drop also works</p>
                 </div>
                 <div class="image-list" id="imageList">
                     <!-- List of uploaded images -->
@@ -62,6 +66,12 @@
                         <button class="btn btn-toolbar" id="addBboxBtn" disabled title="Draw custom text region">
                             <span class="btn-icon">✏️</span> Add Region
                         </button>
+                    </div>
+                    <div class="toolbar-separator"></div>
+                    <div class="toolbar-group page-navigator" id="pageNavigator" style="display: none;">
+                        <button class="btn btn-icon-only page-prev" title="Previous page (←)">◀</button>
+                        <span class="page-indicator">Page 1 of 1</span>
+                        <button class="btn btn-icon-only page-next" title="Next page (→)">▶</button>
                     </div>
                     <div class="toolbar-separator"></div>
                     <div class="toolbar-group">

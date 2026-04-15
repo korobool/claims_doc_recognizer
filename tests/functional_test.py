@@ -41,11 +41,26 @@ from playwright.async_api import (
 
 REMOTE_URL = "http://108.181.157.13:8011"
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
+
+# Images (existing Desktop screenshots) — used as vanilla single-file uploads
+# AND stapled together as a 3-page multipage document.
 IMAGE_PATHS = [
     Path.home() / "Desktop" / "Screenshot 2026-04-15 at 08.26.55.png",
     Path.home() / "Desktop" / "Screenshot 2026-04-15 at 08.27.14.png",
     Path.home() / "Desktop" / "Screenshot 2026-04-15 at 08.27.31.png",
 ]
+
+# Real-world test documents: one scanned PDF invoice and one DOCX
+# questionnaire. These exercise the OCR-fallback path and the DOCX
+# text-layer fast path respectively.
+_SAMPLE_DIR = Path.home() / "Downloads" / "RE_ AI доставчици"
+SCANNED_PDF_PATH = _SAMPLE_DIR / "фактура.pdf"              # 1-page scanned (no text layer)
+DOCX_PATH = _SAMPLE_DIR / "AI Readiness Questionaire for Axiom BG.docx"  # DOCX with native text
+MULTIPAGE_PDF_PATH = _SAMPLE_DIR / "Епикриза.pdf"            # 2-page PDF for multipage nav check
+
+# Synthesized PDF-with-text-layer (covers the fast-path branch that the
+# real samples don't exercise).
+TEXT_LAYER_PDF_PATH = Path(__file__).parent / "assets" / "text_layer_sample.pdf"
 
 OBSERVE_MS = int(os.environ.get("OBSERVE_MS", "1200"))  # visual pause per step
 
@@ -224,31 +239,216 @@ async def step_domain_crud_roundtrip(page: Page) -> None:
     await snap(page, "qa_domain_deleted")
 
 
+def ensure_text_layer_pdf() -> Path:
+    """Synthesize a small text-layer PDF that we can upload to exercise the
+    'PDF has native text, skip OCR' fast path. Regenerates whenever the file
+    is missing so the test is self-contained."""
+    TEXT_LAYER_PDF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if TEXT_LAYER_PDF_PATH.exists():
+        return TEXT_LAYER_PDF_PATH
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(TEXT_LAYER_PDF_PATH), pagesize=letter)
+    for page_num in range(1, 4):
+        c.setFont("Helvetica-Bold", 22)
+        c.drawString(72, 720, f"Synthetic Claim Report — Page {page_num}")
+        c.setFont("Helvetica", 13)
+        c.drawString(72, 695, "This PDF has an embedded text layer and should skip OCR.")
+        c.drawString(72, 675, f"Claim number: QA-{page_num:03d}  |  Policy: POL-2025-{page_num:04d}")
+        c.drawString(72, 655, "Patient: Test User  |  Date: 2026-04-15  |  Amount: 127.50 BGN")
+        c.showPage()
+    c.save()
+    return TEXT_LAYER_PDF_PATH
+
+
 async def step_upload_images(page: Page) -> List[str]:
-    """Upload three screenshots through the real file input and return their ids."""
-    log("Step 7: Upload 3 screenshots via the file input", "step")
-    # Switch to the viewer tab so the image sidebar is relevant
+    """Upload three screenshots as THREE separate documents."""
+    log("Step 7: Upload 3 screenshots as independent documents", "step")
     await page.click("#viewerTabBtn")
     await page.wait_for_selector("#viewerTab.active", timeout=5000)
 
-    # The file input is hidden but set_input_files bypasses the picker.
     for p in IMAGE_PATHS:
         assert p.exists(), f"missing {p}"
 
     await page.set_input_files("#fileInput", [str(p) for p in IMAGE_PATHS])
-    # Wait for sidebar to have 3 items
+    # Three uploaded images produce three separate .image-item rows.
     await page.wait_for_function(
         """() => document.querySelectorAll('.image-item').length >= 3""",
         timeout=30000,
     )
-    ids = await page.evaluate(
-        """() => Array.from(document.querySelectorAll('.image-item')).map(i => i.dataset.id)"""
+    # The sidebar now groups by doc, so we grab doc IDs.
+    doc_ids = await page.evaluate(
+        "() => Array.from(document.querySelectorAll('.image-item')).map(i => i.dataset.docId).filter(Boolean)"
     )
-    assert len(ids) >= 3, f"expected 3 items, got {len(ids)}"
-    log(f"sidebar shows {len(ids)} images", "pass")
+    page_ids = await page.evaluate(
+        "() => Array.from(document.querySelectorAll('.image-item')).map(i => i.dataset.id).filter(Boolean)"
+    )
+    assert len(doc_ids) >= 3, f"expected 3 docs, got {len(doc_ids)}"
+    log(f"sidebar shows {len(doc_ids)} documents", "pass")
     await snap(page, "images_uploaded")
-    await observe(page, "3 images in sidebar")
-    return ids
+    await observe(page, "3 single-image documents in sidebar")
+    return page_ids
+
+
+async def step_upload_pdf_with_text(page: Page) -> None:
+    """Synthetic PDF with a text layer should skip OCR on every page."""
+    log("Step 7b: Upload PDF with native text layer (fast path)", "step")
+    pdf_path = ensure_text_layer_pdf()
+
+    # Capture the doc count before so we can pick out the newly added one.
+    before = await page.evaluate("() => Object.keys(state.documents).length")
+    await page.set_input_files("#fileInput", str(pdf_path))
+    await page.wait_for_function(
+        f"() => Object.keys(state.documents).length > {before}", timeout=60000
+    )
+    new_doc = await page.evaluate(
+        """() => {
+            const docs = Object.values(state.documents);
+            const d = docs[docs.length - 1];
+            return d ? {doc_id: d.doc_id, source_kind: d.source_kind, page_count: d.page_count, has_text_layer: d.has_text_layer, filename: d.filename} : null;
+        }"""
+    )
+    assert new_doc and new_doc["source_kind"] == "pdf", f"bad doc: {new_doc}"
+    assert new_doc["page_count"] == 3, f"expected 3 pages, got {new_doc['page_count']}"
+    assert new_doc["has_text_layer"] is True, "text layer should be present"
+    log(f"pdf-with-text: {new_doc['page_count']} pages, has_text_layer={new_doc['has_text_layer']}", "pass")
+    await snap(page, "pdf_with_text_uploaded")
+
+    # Select it and recognize page 1 — should skip OCR (used_text_layer true).
+    await page.evaluate(f"selectDocument('{new_doc['doc_id']}')")
+    await observe(page, "selected synthetic PDF")
+    await snap(page, "pdf_with_text_selected")
+    nav_visible = await page.is_visible("#pageNavigator")
+    assert nav_visible, "page navigator should be visible for 3-page PDF"
+    log("page navigator visible for multipage PDF", "pass")
+
+    await page.click("#recognizeBtn")
+    await page.wait_for_function(
+        """() => state.ocrResult && state.ocrResult.used_text_layer === true""",
+        timeout=60_000,
+    )
+    log("recognize returned used_text_layer=true (OCR skipped)", "pass")
+    await snap(page, "pdf_with_text_recognized")
+
+
+async def step_upload_scanned_pdf(page: Page) -> None:
+    """Real scanned PDF → OCR fallback path."""
+    log("Step 7c: Upload scanned PDF (OCR fallback)", "step")
+    if not SCANNED_PDF_PATH.exists():
+        log(f"sample missing: {SCANNED_PDF_PATH} — skipping", "fail")
+        return
+    before = await page.evaluate("() => Object.keys(state.documents).length")
+    await page.set_input_files("#fileInput", str(SCANNED_PDF_PATH))
+    await page.wait_for_function(
+        f"() => Object.keys(state.documents).length > {before}", timeout=60000
+    )
+    new_doc = await page.evaluate(
+        """() => {
+            const docs = Object.values(state.documents);
+            const d = docs[docs.length - 1];
+            return d ? {doc_id: d.doc_id, source_kind: d.source_kind, page_count: d.page_count, has_text_layer: d.has_text_layer} : null;
+        }"""
+    )
+    assert new_doc and new_doc["source_kind"] == "pdf", f"bad doc: {new_doc}"
+    assert new_doc["has_text_layer"] is False, "scanned PDF should have no text layer"
+    log(f"scanned pdf: {new_doc['page_count']} pages, no text layer", "pass")
+
+    await page.evaluate(f"selectDocument('{new_doc['doc_id']}')")
+    await page.click("#recognizeBtn")
+    # Wait for OCR to complete (text overlay populated).
+    await page.wait_for_function(
+        """() => state.ocrResult && Array.isArray(state.ocrResult.text_lines) && state.ocrResult.text_lines.length > 0 && state.ocrResult.used_text_layer === false""",
+        timeout=180_000,
+    )
+    lines = await page.evaluate("() => state.ocrResult.text_lines.length")
+    log(f"scanned pdf OCR: {lines} text lines", "pass")
+    await snap(page, "scanned_pdf_recognized")
+
+
+async def step_upload_docx(page: Page) -> None:
+    """Real DOCX → text-layer fast path."""
+    log("Step 7d: Upload DOCX (text-layer fast path)", "step")
+    if not DOCX_PATH.exists():
+        log(f"sample missing: {DOCX_PATH} — skipping", "fail")
+        return
+    before = await page.evaluate("() => Object.keys(state.documents).length")
+    await page.set_input_files("#fileInput", str(DOCX_PATH))
+    await page.wait_for_function(
+        f"() => Object.keys(state.documents).length > {before}", timeout=60000
+    )
+    new_doc = await page.evaluate(
+        """() => {
+            const docs = Object.values(state.documents);
+            const d = docs[docs.length - 1];
+            return d ? {doc_id: d.doc_id, source_kind: d.source_kind, has_text_layer: d.has_text_layer} : null;
+        }"""
+    )
+    assert new_doc and new_doc["source_kind"] == "docx", f"bad doc: {new_doc}"
+    assert new_doc["has_text_layer"] is True, "DOCX should always have text layer"
+    log("docx uploaded with text layer", "pass")
+
+    await page.evaluate(f"selectDocument('{new_doc['doc_id']}')")
+    await page.click("#recognizeBtn")
+    await page.wait_for_function(
+        """() => state.ocrResult && state.ocrResult.used_text_layer === true""",
+        timeout=60_000,
+    )
+    log("recognize used text layer (OCR skipped)", "pass")
+    await snap(page, "docx_recognized")
+
+
+async def step_upload_multipage_from_screenshots(page: Page) -> None:
+    """Upload the three screenshots again, this time stapled into a single
+    3-page multipage document via the new Upload Multipage button."""
+    log("Step 7e: Upload 3 screenshots as one multipage document", "step")
+
+    # Replace the native prompt so we don't hang on the name dialog.
+    await page.evaluate(
+        "() => { window.prompt = () => 'QA Multipage Bundle'; window.confirm = () => true; }"
+    )
+    before = await page.evaluate("() => Object.keys(state.documents).length")
+    await page.set_input_files("#fileInputMultipage", [str(p) for p in IMAGE_PATHS])
+    await page.wait_for_function(
+        f"() => Object.keys(state.documents).length > {before}", timeout=60000
+    )
+    new_doc = await page.evaluate(
+        """() => {
+            const docs = Object.values(state.documents);
+            const d = docs[docs.length - 1];
+            return d ? {doc_id: d.doc_id, source_kind: d.source_kind, page_count: d.page_count, filename: d.filename} : null;
+        }"""
+    )
+    assert new_doc and new_doc["source_kind"] == "multipage", f"bad doc: {new_doc}"
+    assert new_doc["page_count"] == 3, f"expected 3 pages, got {new_doc['page_count']}"
+    log(f"multipage doc: {new_doc['filename']} with {new_doc['page_count']} pages", "pass")
+    await snap(page, "multipage_uploaded")
+
+    await page.evaluate(f"selectDocument('{new_doc['doc_id']}')")
+    # Verify page navigator is visible and walks through pages 1 → 2 → 3.
+    await page.wait_for_selector("#pageNavigator:visible", timeout=5000)
+    indicator = await page.locator("#pageNavigator .page-indicator").text_content()
+    assert "Page 1 of 3" in (indicator or ""), f"bad indicator: {indicator}"
+    log(f"indicator: {indicator}", "pass")
+    await snap(page, "multipage_page1")
+
+    await page.click("#pageNavigator .page-next")
+    await page.wait_for_function(
+        "() => document.querySelector('#pageNavigator .page-indicator').textContent.includes('Page 2 of 3')"
+    )
+    log("navigated to page 2", "pass")
+    await snap(page, "multipage_page2")
+
+    await page.click("#pageNavigator .page-next")
+    await page.wait_for_function(
+        "() => document.querySelector('#pageNavigator .page-indicator').textContent.includes('Page 3 of 3')"
+    )
+    log("navigated to page 3", "pass")
+    await snap(page, "multipage_page3")
+
+    # Next should be disabled on last page.
+    assert await page.locator("#pageNavigator .page-next").is_disabled()
+    log("next button disabled on last page", "pass")
 
 
 async def step_recognize(page: Page, image_ids: List[str]) -> None:
@@ -307,6 +507,44 @@ async def step_switch_active_domain_via_api(page: Page, domain_id: str) -> None:
     )
     assert result["status"] == 200, f"switch failed: {result}"
     log(f"active domain → {result['body']['display_name']}", "pass")
+
+
+async def step_recognize_and_llm_multipage(page: Page) -> None:
+    """Assumes the currently-selected document is the multipage screenshot
+    bundle. Recognizes each page in turn, then runs LLM on the whole
+    document so the server aggregates text across pages."""
+    log("Step 12: Recognize + LLM on multipage bundle", "step")
+    doc = await page.evaluate(
+        """() => {
+            const d = state.documents[state.selectedDocId];
+            return d ? {doc_id: d.doc_id, page_count: d.page_count, filename: d.filename} : null;
+        }"""
+    )
+    if not doc or doc["page_count"] < 2:
+        log("selected doc is not multipage — skipping", "fail")
+        return
+
+    # Walk through pages and recognize each one.
+    for i in range(1, doc["page_count"] + 1):
+        await page.evaluate(f"selectDocument('{doc['doc_id']}', {i})")
+        await page.click("#recognizeBtn")
+        await page.wait_for_function(
+            """() => state.ocrResult && Array.isArray(state.ocrResult.text_lines) && state.ocrResult.text_lines.length > 0""",
+            timeout=180_000,
+        )
+        log(f"recognized page {i}", "pass")
+    await snap(page, "multipage_all_recognized")
+
+    # Go back to page 1 and trigger LLM on the whole document.
+    await page.evaluate(f"selectDocument('{doc['doc_id']}', 1)")
+    await page.click("#llmTabBtn")
+    await page.wait_for_selector("#llmMainTab.active", timeout=5000)
+    process_btn = page.locator("#processLlmBtnMain")
+    await expect(process_btn).to_be_enabled()
+    await process_btn.click()
+    await page.wait_for_selector("#llmResultMain:visible", timeout=240_000)
+    await snap(page, "multipage_llm_result")
+    log("multipage LLM result displayed", "pass")
 
 
 async def step_generate_schema(page: Page) -> None:
@@ -403,18 +641,17 @@ async def main() -> int:
             await safe(step_switch_to_motor_and_activate(page), "motor_active")
             await safe(step_switch_back_to_health(page), "health_active")
             await safe(step_domain_crud_roundtrip(page), "domain_crud")
+
+            # --- Baseline image flow: upload 3 screenshots, OCR, LLM ---
             ids = await safe(step_upload_images(page), "upload")
             if ids:
                 await safe(step_recognize(page, ids), "recognize")
-                # health domain LLM result
                 health_text = await safe(step_process_llm(page, "health"), "llm_health")
-                # switch to motor and re-process
                 await safe(
                     step_switch_active_domain_via_api(page, "motor_insurance"),
                     "switch_to_motor",
                 )
                 motor_text = await safe(step_process_llm(page, "motor"), "llm_motor")
-                # switch back
                 await safe(
                     step_switch_active_domain_via_api(page, "health_insurance"),
                     "switch_back_health",
@@ -424,7 +661,8 @@ async def main() -> int:
                         f"health chars={len(health_text)} motor chars={len(motor_text)}",
                         "info",
                     )
-            # Regenerate a schema now that motor is active (for an interesting demo)
+
+            # --- Schema generation with motor domain active ---
             await safe(
                 step_switch_active_domain_via_api(page, "motor_insurance"),
                 "switch_to_motor_for_schema",
@@ -434,6 +672,15 @@ async def main() -> int:
                 step_switch_active_domain_via_api(page, "health_insurance"),
                 "restore_health",
             )
+
+            # --- New upload paths: PDF (text layer + scanned), DOCX, multipage ---
+            await safe(step_upload_pdf_with_text(page), "upload_pdf_text_layer")
+            await safe(step_upload_scanned_pdf(page), "upload_scanned_pdf")
+            await safe(step_upload_docx(page), "upload_docx")
+            await safe(step_upload_multipage_from_screenshots(page), "upload_multipage")
+
+            # --- Final: run LLM on the multipage doc to verify aggregation ---
+            await safe(step_recognize_and_llm_multipage(page), "multipage_llm")
         finally:
             print("\n=== test run complete ===")
             if failures:

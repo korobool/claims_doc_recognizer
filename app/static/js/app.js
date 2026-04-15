@@ -1,5 +1,11 @@
 // Application state
 const state = {
+    // Documents are the canonical upload unit; `images` is a flat cache of
+    // their pages, one entry per page, kept for backwards compatibility with
+    // the existing per-page selection / caching / overlay code paths.
+    documents: {},          // { doc_id: { doc_id, filename, source_kind, page_count, has_text_layer, pages: [PageSummary] } }
+    selectedDocId: null,
+    selectedPageIndex: 1,   // 1-based within the selected doc
     images: [],
     selectedImageId: null,
     ocrResult: null,
@@ -146,6 +152,23 @@ document.addEventListener('DOMContentLoaded', init);
 function init() {
     // File upload
     elements.fileInput.addEventListener('change', handleFileSelect);
+    const fileInputMultipage = document.getElementById('fileInputMultipage');
+    if (fileInputMultipage) {
+        fileInputMultipage.addEventListener('change', handleMultipageFileSelect);
+    }
+    const pageNav = document.getElementById('pageNavigator');
+    if (pageNav) {
+        pageNav.querySelector('.page-prev')?.addEventListener('click', () => navigatePage(-1));
+        pageNav.querySelector('.page-next')?.addEventListener('click', () => navigatePage(1));
+    }
+    // Keyboard arrows navigate pages when the viewer tab is active.
+    document.addEventListener('keydown', (e) => {
+        const tag = (e.target?.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
+        if (!document.getElementById('viewerTab')?.classList.contains('active')) return;
+        if (e.key === 'ArrowLeft') { navigatePage(-1); e.preventDefault(); }
+        else if (e.key === 'ArrowRight') { navigatePage(1); e.preventDefault(); }
+    });
     
     // Drag and drop
     elements.uploadArea.addEventListener('dragover', handleDragOver);
@@ -452,68 +475,191 @@ function handleFileSelect(e) {
     }
 }
 
-async function uploadFiles(files) {
+async function uploadFiles(files, options = {}) {
+    const {multipage = false, multipageName = null} = options;
     const formData = new FormData();
     for (const file of files) {
         formData.append('files', file);
     }
-    
+    if (multipage && multipageName) {
+        formData.append('name', multipageName);
+    }
+
     const startTime = Date.now();
-    addLogEntry(`Uploading ${files.length} file(s)...`, 'processing');
+    const label = multipage
+        ? `Uploading ${files.length} file(s) as a multipage document...`
+        : `Uploading ${files.length} file(s)...`;
+    addLogEntry(label, 'processing');
     updateActivityIndicator('processing');
-    
+
     try {
-        const response = await fetch('/api/upload', {
+        const endpoint = multipage ? '/api/upload/multipage' : '/api/upload';
+        const response = await fetch(endpoint, {
             method: 'POST',
-            body: formData
+            body: formData,
         });
-        
+
         if (!response.ok) {
-            throw new Error('Upload failed');
+            const err = await response.json().catch(() => ({}));
+            throw new Error(formatApiError(err) || `HTTP ${response.status}`);
         }
-        
+
         const data = await response.json();
         const elapsed = Date.now() - startTime;
-        
-        // Add images to list
-        for (const img of data.images) {
+
+        // Register the new documents.
+        for (const docSummary of data.documents || []) {
+            state.documents[docSummary.doc_id] = docSummary;
+            addDocumentToList(docSummary);
+        }
+
+        // Each page becomes an entry in the flat images list too — everything
+        // downstream (viewer, caching, recognize button) is still page-scoped.
+        for (const img of data.images || []) {
             state.images.push(img);
-            addImageToList(img);
         }
-        
-        // Select first uploaded if nothing selected
-        if (!state.selectedImageId && data.images.length > 0) {
-            selectImage(data.images[0].id);
+
+        // Auto-select the first freshly uploaded document.
+        const firstDoc = (data.documents || [])[0];
+        if (firstDoc && !state.selectedDocId) {
+            selectDocument(firstDoc.doc_id);
         }
-        
-        addLogEntry(`Uploaded ${data.images.length} file(s) successfully`, 'success', formatDuration(elapsed));
-        
+
+        const summary = (data.documents || []).map(d =>
+            d.page_count > 1 ? `${d.filename} (${d.page_count}p)` : d.filename
+        ).join(', ');
+        addLogEntry(`Uploaded: ${summary}`, 'success', formatDuration(elapsed));
+
     } catch (error) {
         console.error('Upload error:', error);
         addLogEntry(`Upload failed: ${error.message}`, 'error');
-        alert('Error uploading files');
+        alert('Error uploading files: ' + error.message);
     }
-    
-    // Reset input
+
     elements.fileInput.value = '';
+    const multipageInput = document.getElementById('fileInputMultipage');
+    if (multipageInput) multipageInput.value = '';
 }
 
-function addImageToList(image) {
+function handleMultipageFileSelect(e) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (files.length < 2) {
+        const ok = confirm(
+            'Multipage upload is meant for 2+ files that belong together.\n' +
+            'Upload this single file as a regular document instead?'
+        );
+        if (ok) {
+            uploadFiles(files);
+        } else {
+            uploadFiles(files, {multipage: true, multipageName: files[0].name});
+        }
+        e.target.value = '';
+        return;
+    }
+    const defaultName = `Multipage: ${files[0].name} + ${files.length - 1} more`;
+    const name = prompt('Name for this multipage document:', defaultName) || defaultName;
+    uploadFiles(files, {multipage: true, multipageName: name});
+}
+
+function kindIcon(sourceKind) {
+    switch (sourceKind) {
+        case 'pdf':       return '📕';
+        case 'docx':      return '📝';
+        case 'multipage': return '📚';
+        default:          return '🖼️';
+    }
+}
+
+function addDocumentToList(doc) {
     const item = document.createElement('div');
     item.className = 'image-item';
-    item.dataset.id = image.id;
+    item.dataset.docId = doc.doc_id;
+    const firstPageId = doc.pages?.[0]?.page_id;
+    item.dataset.id = firstPageId; // backwards compat for any lookup-by-id
+    const pageBadge = doc.page_count > 1
+        ? `<span class="page-count-badge" title="${doc.page_count} pages">${doc.page_count}p</span>`
+        : '';
+    const textBadge = doc.has_text_layer
+        ? '<span class="status-icon" title="Native text layer available">🔤</span>'
+        : '';
+    const thumbnailSrc = firstPageId ? `/api/image/${firstPageId}` : '';
     item.innerHTML = `
-        <img src="/api/image/${image.id}" alt="${image.filename}">
+        <img src="${thumbnailSrc}" alt="${escapeHtml(doc.filename)}">
         <div class="image-item-info">
-            <span class="filename">${image.filename}</span>
+            <span class="filename">${kindIcon(doc.source_kind)} ${escapeHtml(doc.filename)} ${pageBadge}</span>
             <div class="image-status-icons">
+                ${textBadge}
                 <span class="status-icon ocr-status" title="OCR" style="display: none;">📝</span>
                 <span class="status-icon llm-status" title="LLM" style="display: none;">🤖</span>
             </div>
         </div>
     `;
-    item.addEventListener('click', () => selectImage(image.id));
+    item.addEventListener('click', () => selectDocument(doc.doc_id));
     elements.imageList.appendChild(item);
+}
+
+// Kept for any external call paths; delegates to the document handler by
+// finding the parent doc of the given page_id.
+function addImageToList(image) {
+    if (image.doc_id && state.documents[image.doc_id]) {
+        // Already added via addDocumentToList; nothing to do.
+        return;
+    }
+    // Legacy fallback: render as a 1-page synthetic doc.
+    const synthetic = {
+        doc_id: `legacy-${image.id}`,
+        filename: image.filename,
+        source_kind: 'image',
+        page_count: 1,
+        has_text_layer: false,
+        pages: [{page_id: image.id, doc_id: `legacy-${image.id}`, index: 1, has_text_layer: false}],
+    };
+    state.documents[synthetic.doc_id] = synthetic;
+    addDocumentToList(synthetic);
+}
+
+function selectDocument(docId, pageIndex = 1) {
+    const doc = state.documents[docId];
+    if (!doc) {
+        console.warn(`Unknown document: ${docId}`);
+        return;
+    }
+    state.selectedDocId = docId;
+    state.selectedPageIndex = Math.max(1, Math.min(pageIndex, doc.page_count));
+    const page = doc.pages[state.selectedPageIndex - 1];
+    if (!page) return;
+    // Highlight the selected row in the sidebar.
+    document.querySelectorAll('.image-item').forEach(el => el.classList.remove('selected'));
+    const row = document.querySelector(`.image-item[data-doc-id="${docId}"]`);
+    if (row) row.classList.add('selected');
+    updatePageNavigator();
+    selectImage(page.page_id);
+}
+
+function updatePageNavigator() {
+    const nav = document.getElementById('pageNavigator');
+    if (!nav) return;
+    const doc = state.documents[state.selectedDocId];
+    if (!doc || doc.page_count <= 1) {
+        nav.style.display = 'none';
+        return;
+    }
+    nav.style.display = 'flex';
+    const label = nav.querySelector('.page-indicator');
+    const prev = nav.querySelector('.page-prev');
+    const next = nav.querySelector('.page-next');
+    if (label) label.textContent = `Page ${state.selectedPageIndex} of ${doc.page_count}`;
+    if (prev) prev.disabled = state.selectedPageIndex <= 1;
+    if (next) next.disabled = state.selectedPageIndex >= doc.page_count;
+}
+
+function navigatePage(delta) {
+    const doc = state.documents[state.selectedDocId];
+    if (!doc || doc.page_count <= 1) return;
+    const newIndex = state.selectedPageIndex + delta;
+    if (newIndex < 1 || newIndex > doc.page_count) return;
+    selectDocument(state.selectedDocId, newIndex);
 }
 
 // Update image list item status indicators
@@ -2582,15 +2728,22 @@ async function processWithLlmMain() {
                             'unknown';
         
         const imageId = state.ocrResult?.image_id || state.selectedImageId || null;
+        // Multipage: send doc_id so the backend aggregates every page's text
+        // layer + vision images automatically. For single-page docs the
+        // difference is nil.
+        const docId = state.selectedDocId
+            || state.documents[state.ocrResult?.doc_id]?.doc_id
+            || null;
         const requestBody = {
             text: fullText,
             model: modelId,
             document_type: documentType,
             image_id: imageId,
-            use_vision: true
+            doc_id: docId,
+            use_vision: true,
         };
-        
-        console.log('[LLM Main] Sending streaming request with image_id:', imageId);
+
+        console.log('[LLM Main] Sending streaming request with doc_id:', docId, 'image_id:', imageId);
         
         // Use streaming endpoint
         const response = await fetch('/api/llm/process/stream', {
